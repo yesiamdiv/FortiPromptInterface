@@ -1,14 +1,28 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { DefenseLog } from '../types';
 import BackendConfigForm from '../components/common/BackendConfigForm';
+import { useAppStore } from '../store/appStore';
 
 const DefenseTestingPage: React.FC = () => {
-  const [defenseRunning, setDefenseRunning] = useState(false);
+  const { defenseRunning, setDefenseRunning, logs, addLog, fetchDefenseLogs, activeRun } = useAppStore((state) => ({
+    defenseRunning: state.defenseRunning,
+    setDefenseRunning: state.setDefenseRunning,
+    addLog: state.addLog,
+    fetchDefenseLogs: state.fetchDefenseLogs,
+  }));
+//   const [defenseRunning, setDefenseRunning] = useState(false);
   const [logs] = useState<DefenseLog[]>([
     { id: 1, type: 'pass', layer: 'Semantic Filter', prompt: 'Hello, how are you?', result: 'Passed - Normal query', time: '10:23:41' },
     { id: 2, type: 'block', layer: 'Regex Scanner', prompt: 'Ignore previous instructions...', result: 'Blocked - Injection pattern detected', time: '10:23:42' },
     { id: 3, type: 'pass', layer: 'Context Validator', prompt: 'What is 2+2?', result: 'Passed - Valid context', time: '10:23:43' },
   ]);
+
+  React.useEffect(() => {
+    // Assuming activeRun is available and has an id
+    if (activeRun?.id) {
+      fetchDefenseLogs(activeRun.id);
+    }
+  }, [fetchDefenseLogs, activeRun?.id]);
 
   return (
     <div className="space-y-6">

@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import BackendConfigForm from '../components/common/BackendConfigForm';
+import { useAppStore } from '../store/appStore';
 
 const AttackTrainingPage: React.FC = () => {
-  const [trainingActive, setTrainingActive] = useState(false);
+  const { trainingActive, setTrainingActive, consoleOutput, addConsoleOutput } = useAppStore((state) => ({
+    trainingActive: state.trainingActive,
+    setTrainingActive: state.setTrainingActive,
+    addConsoleOutput: state.addConsoleOutput,
+  }));
+//   const [trainingActive, setTrainingActive] = useState(false);
   const [consoleOutput] = useState([
     '[INFO] Initializing training environment...',
     '[INFO] Loading base model: GPT-4o-mini',
@@ -10,6 +16,13 @@ const AttackTrainingPage: React.FC = () => {
     '[TRAIN] Epoch 1/10 - Loss: 0.456, Success Rate: 34.2%',
     '[TRAIN] Epoch 2/10 - Loss: 0.389, Success Rate: 45.8%',
   ]);
+
+  React.useEffect(() => {
+    // Assuming activeRun is available and has an id
+    if (activeRun?.id) {
+      fetchConsoleOutput(activeRun.id);
+    }
+  }, [fetchConsoleOutput, activeRun?.id]);
 
   return (
     <div className="space-y-6">

@@ -1,8 +1,9 @@
 import { LucideIcon } from 'lucide-react';
 
 export type SessionStatus = 'running' | 'idle' | 'paused' | 'completed' | 'failed';
-// export type ComponentType = 'attack-testing' | 'defense-testing' | 'attack-training' | 'defense-training';
+// export type ComponentType = 'attack-testing' | 'defense-testing';
 export type ComponentType = 'attack-testing' | 'defense-testing';
+
 export type AttackType = 'single' | 'chain';
 export type AttackStatus = 'success' | 'partial' | 'blocked';
 export type LogType = 'pass' | 'block';

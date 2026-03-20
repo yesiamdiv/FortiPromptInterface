@@ -117,7 +117,7 @@ export const stopAttack = async (runId: string): Promise<void> => {
 };
 
 /**
- * Fetch attack prompts for a run
+ * Fetch attack prompts from backend
  * GET /api/runs/:runId/attack/prompts
  */
 export const fetchAttackPrompts = async (runId: string): Promise<AttackPrompt[]> => {
@@ -170,7 +170,7 @@ export const stopDefense = async (runId: string): Promise<void> => {
 };
 
 /**
- * Fetch defense logs
+ * Fetch defense logs from backend
  * GET /api/runs/:runId/defense/logs
  */
 export const fetchDefenseLogs = async (runId: string): Promise<DefenseLog[]> => {
@@ -235,6 +235,18 @@ export const testDefenseBackendConnection = async (url: string): Promise<boolean
 export const fetchEvaluationResults = async (runId: string): Promise<EvaluationResult[]> => {
   // TODO: Implement API call
   // const response = await fetch(`${API_BASE_URL}/runs/${runId}/evaluation`);
+  // return response.json();
+  
+  return [];
+};
+
+/**
+ * Fetch console output from backend
+ * GET /api/runs/:runId/training/console
+ */
+export const fetchConsoleOutput = async (runId: string): Promise<string[]> => {
+  // TODO: Implement API call
+  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/training/console`);
   // return response.json();
   
   return [];

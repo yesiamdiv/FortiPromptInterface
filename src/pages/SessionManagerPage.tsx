@@ -1,24 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Upload, Copy, Zap, Shield, Brain, Database } from 'lucide-react';
 import { Run, RunTemplate, ComponentLabel, ComponentType } from '../types';
 import TemplateCard from '../components/session/TemplateCard';
 import CreateRunModal from '../components/session/CreateSessionModal';
+import { useAppStore } from '../store/appStore';
 
 interface RunManagerPageProps {
   onOpenRun: (run: Run) => void;
 }
 
 const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
-  const [runs, setRuns] = useState<Run[]>([
-    {
-      id: '1',
-      name: "RAG Jailbreak Testing",
-      description: "Full pipeline test for RAG security vulnerabilities",
-      components: ['attack-testing', 'defense-testing'],
-      status: 'running',
-      lastActive: '2 hours ago',
-      created: 'Jan 20, 2026'
-    },
+  const { runs, addRun, fetchRuns } = useAppStore((state) => ({
+    // runs: state.runs,
+  // addRun: state.addRun,
+  fetchRuns: state.fetchRuns,
+  runs: state.runs
+  }));
+  // const [runs, setRuns] = useState<Run[]>([
+    // {
+    //   id: '1',
+    //   name: "RAG Jailbreak Testing",
+    //   description: "Full pipeline test for RAG security vulnerabilities",
+    //   components: ['attack-testing', 'defense-testing'],
+    //   status: 'running',
+    //   lastActive: '2 hours ago',
+    //   created: 'Jan 20, 2026'
+    // },
     // {
     //   id: 2,
     //   name: "Red Team Model Training",
@@ -37,9 +44,13 @@ const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
     //   lastActive: 'Just now',
     //   created: 'Jan 21, 2026'
     // }
-  ]);
+  // ]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+
+  React.useEffect(() => {
+    fetchRuns();
+  }, [fetchRuns]);
 
   const templates: RunTemplate[] = [
     {
@@ -79,7 +90,7 @@ const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
       lastActive: 'Just now',
       created: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
     };
-    setRuns(prev => [...prev, newRun]);
+    addRun(newRun);
   };
   return (
   <div className="space-y-6">

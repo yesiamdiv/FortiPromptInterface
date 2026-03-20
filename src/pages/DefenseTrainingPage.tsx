@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
 import BackendConfigForm from '../components/common/BackendConfigForm';
+import { useAppStore } from '../store/appStore';
 
 const DefenseTrainingPage: React.FC = () => {
-  const [trainingActive, setTrainingActive] = useState(false);
+  const { trainingActive, setTrainingActive } = useAppStore((state) => ({
+    trainingActive: state.trainingActive,
+    setTrainingActive: state.setTrainingActive,
+  }));
+//   const [trainingActive, setTrainingActive] = useState(false);
 
   return (
     <div className="space-y-6">

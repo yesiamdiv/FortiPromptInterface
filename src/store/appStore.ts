@@ -18,6 +18,10 @@ interface AppState {
   currentView: 'run-manager' | 'run-workspace';
   activeTab: ComponentType | 'overview';
 
+
+  // Component Labels
+  componentLabels: Record<ComponentType, ComponentLabel>;
+
   // Attack State
   attackConfig: Partial<AttackConfig>;
   attackBackendConfig: Partial<BackendConfig>;
@@ -63,6 +67,25 @@ interface AppState {
   setDefenseStats: (stats: DefenseStats) => void;
   setDefenseRunning: (running: boolean) => void;
   setDataStorageConfig: (config: Partial<DataStorageConfig>) => void;
+
+  // Fetch Functions
+  fetchRuns: async () => {
+    const fetchedRuns = await api.fetchRuns();
+    set({ runs: fetchedRuns });
+  };
+  fetchAttackPrompts: async (runId: string) => {
+    const prompts = await api.fetchAttackPrompts(runId);
+    set({ attackPrompts: prompts });
+  };
+  fetchDefenseLogs: async (runId: string) => {
+    const logs = await api.fetchDefenseLogs(runId);
+    set({ defenseLogs: logs });
+  };
+  fetchConsoleOutput: (runId: string) => Promise<void>;
+  fetchConsoleOutput: async (runId) => {
+    const output = await api.fetchConsoleOutput(runId);
+    set({ consoleOutput: output });
+  },
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -127,6 +150,16 @@ export const useAppStore = create<AppState>((set) => ({
   defenseRunning: false,
   dataStorageConfig: {},
 
+  // Initial State - Component Labels
+  componentLabels: {
+    'attack-testing': { name: 'Attack Testing', icon: Zap, color: 'red' },
+    'defense-testing': { name: 'Defense Testing', icon: Shield, color: 'blue' },
+  },
+
+  // Initial State - Training
+  trainingActive: false,
+  consoleOutput: [],
+
   // Actions - Run Management
   setRuns: (runs) => set({ runs }),
   addRun: (run) => set((state) => ({ runs: [...state.runs, run] })),
@@ -167,4 +200,22 @@ export const useAppStore = create<AppState>((set) => ({
   setDefenseRunning: (running) => set({ defenseRunning: running }),
   setDataStorageConfig: (config) =>
     set((state) => ({ dataStorageConfig: { ...state.dataStorageConfig, ...config } })),
+  // Fetch Functions
+  fetchRuns: async () => {
+    const fetchedRuns = await api.fetchRuns();
+    set({ runs: fetchedRuns });
+  };
+  fetchAttackPrompts: async (runId: string) => {
+    const prompts = await api.fetchAttackPrompts(runId);
+    set({ attackPrompts: prompts });
+  };
+  fetchDefenseLogs: async (runId: string) => {
+    const logs = await api.fetchDefenseLogs(runId);
+    set({ defenseLogs: logs });
+  };
+  fetchConsoleOutput: (runId: string) => Promise<void>;
+  fetchConsoleOutput: async (runId) => {
+    const output = await api.fetchConsoleOutput(runId);
+    set({ consoleOutput: output });
+  },
 }));
