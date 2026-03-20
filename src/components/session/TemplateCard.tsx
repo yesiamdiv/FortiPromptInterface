@@ -4,14 +4,12 @@ import { RunTemplate, ComponentLabel } from '../../types';
 interface TemplateCardProps {
   template: RunTemplate;
   componentLabels: Record<string, ComponentLabel>;
-  onSelectTemplate?: (template: RunTemplate) => void; // Optional if just for display
 }
 
-const TemplateCard: React.FC<TemplateCardProps> = ({ template, componentLabels, onSelectTemplate }) => {
+const TemplateCard: React.FC<TemplateCardProps> = ({ template, componentLabels }) => {
   return (
     <div
-      className="bg-slate-900 border border-slate-600 rounded-lg p-4 hover:border-slate-500 cursor-pointer"
-      onClick={() => onSelectTemplate && onSelectTemplate(template)}
+      className="bg-slate-900 border border-slate-600 rounded-lg p-4"
     >
       <h4 className="font-semibold mb-2">{template.name}</h4>
       <p className="text-sm text-slate-400 mb-3">{template.description}</p>

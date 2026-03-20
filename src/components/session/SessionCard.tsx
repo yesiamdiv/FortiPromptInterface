@@ -1,15 +1,12 @@
 import React from 'react';
 import { Run, ComponentLabel } from '../../types';
-import { Play, Pause, Download, Trash2, Edit } from 'lucide-react';
-import { exportRun } from '../../utils/run'; // Assuming you'll create this utility
 
 interface RunCardProps {
   run: Run;
   componentLabels: Record<string, ComponentLabel>;
-  onOpenRun: (run: Run) => void;
 }
 
-const RunCard: React.FC<RunCardProps> = ({ run, componentLabels, onOpenRun }) => {
+const RunCard: React.FC<RunCardProps> = ({ run, componentLabels }) => {
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-slate-600 transition-colors">
       {/* run Header */}
@@ -25,7 +22,6 @@ const RunCard: React.FC<RunCardProps> = ({ run, componentLabels, onOpenRun }) =>
                     : 'bg-slate-700 text-slate-400'
                 }`}
               >
-                {run.status === 'running' ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
                 {run.status}
               </span>
             </div>
@@ -38,13 +34,11 @@ const RunCard: React.FC<RunCardProps> = ({ run, componentLabels, onOpenRun }) =>
           {run.components.map((comp) => {
             const label = componentLabels[comp];
             if (!label) return null; // Handle cases where component type might not be in labels
-            const Icon = label.icon;
             return (
               <span
                 key={comp}
                 className={`flex items-center gap-1 text-xs px-2 py-1 rounded bg-${label.color}-900/30 text-${label.color}-400 border border-${label.color}-700`}
               >
-                <Icon className="w-3 h-3" />
                 {label.name}
               </span>
             );
@@ -61,20 +55,16 @@ const RunCard: React.FC<RunCardProps> = ({ run, componentLabels, onOpenRun }) =>
       {/* run Actions */}
       <div className="p-4 bg-slate-900/50 flex items-center justify-between">
         <button
-          onClick={() => onOpenRun(run)}
           className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm font-medium"
         >
           Open run
         </button>
         <div className="flex gap-2">
           <button className="p-2 hover:bg-slate-700 rounded" title="Edit">
-            <Edit className="w-4 h-4" />
           </button>
-          <button onClick={() => exportRun(run)} className="p-2 hover:bg-slate-700 rounded" title="Export">
-            <Download className="w-4 h-4" />
+          <button className="p-2 hover:bg-slate-700 rounded" title="Export">
           </button>
           <button className="p-2 hover:bg-slate-700 rounded text-red-400" title="Delete">
-            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>

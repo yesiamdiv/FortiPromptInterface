@@ -28,10 +28,6 @@ const WS_BASE_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
  * GET /api/runs
  */
 export const fetchRuns = async (): Promise<Run[]> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs`);
-  // return response.json();
-  
   return [];
 };
 
@@ -40,14 +36,6 @@ export const fetchRuns = async (): Promise<Run[]> => {
  * POST /api/runs
  */
 export const createRun = async (run: Omit<Run, 'id'>): Promise<Run> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(run),
-  // });
-  // return response.json();
-  
   return { ...run, id: '' };
 };
 
@@ -56,14 +44,6 @@ export const createRun = async (run: Omit<Run, 'id'>): Promise<Run> => {
  * PATCH /api/runs/:id
  */
 export const updateRun = async (id: string, updates: Partial<Run>): Promise<Run> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${id}`, {
-  //   method: 'PATCH',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(updates),
-  // });
-  // return response.json();
-  
   return { id, ...updates } as Run;
 };
 
@@ -72,10 +52,6 @@ export const updateRun = async (id: string, updates: Partial<Run>): Promise<Run>
  * DELETE /api/runs/:id
  */
 export const deleteRun = async (id: string): Promise<void> => {
-  // TODO: Implement API call
-  // await fetch(`${API_BASE_URL}/runs/${id}`, {
-  //   method: 'DELETE',
-  // });
 };
 
 /**
@@ -83,10 +59,6 @@ export const deleteRun = async (id: string): Promise<void> => {
  * GET /api/runs/:id/export
  */
 export const exportRun = async (id: string): Promise<Blob> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${id}/export`);
-  // return response.blob();
-  
   return new Blob();
 };
 
@@ -97,12 +69,6 @@ export const exportRun = async (id: string): Promise<Blob> => {
  * POST /api/runs/:runId/attack/start
  */
 export const startAttack = async (runId: string, config: AttackConfig): Promise<void> => {
-  // TODO: Implement API call
-  // await fetch(`${API_BASE_URL}/runs/${runId}/attack/start`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(config),
-  // });
 };
 
 /**
@@ -110,10 +76,6 @@ export const startAttack = async (runId: string, config: AttackConfig): Promise<
  * POST /api/runs/:runId/attack/stop
  */
 export const stopAttack = async (runId: string): Promise<void> => {
-  // TODO: Implement API call
-  // await fetch(`${API_BASE_URL}/runs/${runId}/attack/stop`, {
-  //   method: 'POST',
-  // });
 };
 
 /**
@@ -121,10 +83,6 @@ export const stopAttack = async (runId: string): Promise<void> => {
  * GET /api/runs/:runId/attack/prompts
  */
 export const fetchAttackPrompts = async (runId: string): Promise<AttackPrompt[]> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/attack/prompts`);
-  // return response.json();
-  
   return [];
 };
 
@@ -133,15 +91,6 @@ export const fetchAttackPrompts = async (runId: string): Promise<AttackPrompt[]>
  * POST /api/attack/test-connection
  */
 export const testAttackBackendConnection = async (url: string, apiKey?: string): Promise<boolean> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/attack/test-connection`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ url, apiKey }),
-  // });
-  // const data = await response.json();
-  // return data.success;
-  
   return false;
 };
 
@@ -152,10 +101,6 @@ export const testAttackBackendConnection = async (url: string, apiKey?: string):
  * POST /api/runs/:runId/defense/start
  */
 export const startDefense = async (runId: string): Promise<void> => {
-  // TODO: Implement API call
-  // await fetch(`${API_BASE_URL}/runs/${runId}/defense/start`, {
-  //   method: 'POST',
-  // });
 };
 
 /**
@@ -163,10 +108,6 @@ export const startDefense = async (runId: string): Promise<void> => {
  * POST /api/runs/:runId/defense/stop
  */
 export const stopDefense = async (runId: string): Promise<void> => {
-  // TODO: Implement API call
-  // await fetch(`${API_BASE_URL}/runs/${runId}/defense/stop`, {
-  //   method: 'POST',
-  // });
 };
 
 /**
@@ -174,10 +115,6 @@ export const stopDefense = async (runId: string): Promise<void> => {
  * GET /api/runs/:runId/defense/logs
  */
 export const fetchDefenseLogs = async (runId: string): Promise<DefenseLog[]> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/defense/logs`);
-  // return response.json();
-  
   return [];
 };
 
@@ -185,27 +122,15 @@ export const fetchDefenseLogs = async (runId: string): Promise<DefenseLog[]> => 
  * Fetch defense statistics
  * GET /api/runs/:runId/defense/stats
  */
-export const fetchDefenseStats = async (runId: string): Promise<DefenseStats> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/defense/stats`);
-  // return response.json();
-  
-  return {
-    blockedAttacks: 0,
-    passedLegitimate: 0,
-    accuracy: 0,
-  };
-};
+// export const fetchDefenseStats = async (runId: string): Promise<DefenseStats> => {
+//   return {};
+// };
 
 /**
  * Export defense logs
  * GET /api/runs/:runId/defense/export
  */
 export const exportDefenseLogs = async (runId: string): Promise<Blob> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/defense/export`);
-  // return response.blob();
-  
   return new Blob();
 };
 
@@ -214,15 +139,6 @@ export const exportDefenseLogs = async (runId: string): Promise<Blob> => {
  * POST /api/defense/test-connection
  */
 export const testDefenseBackendConnection = async (url: string): Promise<boolean> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/defense/test-connection`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ url }),
-  // });
-  // const data = await response.json();
-  // return data.success;
-  
   return false;
 };
 
@@ -233,10 +149,6 @@ export const testDefenseBackendConnection = async (url: string): Promise<boolean
  * GET /api/runs/:runId/evaluation
  */
 export const fetchEvaluationResults = async (runId: string): Promise<EvaluationResult[]> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/evaluation`);
-  // return response.json();
-  
   return [];
 };
 
@@ -245,10 +157,6 @@ export const fetchEvaluationResults = async (runId: string): Promise<EvaluationR
  * GET /api/runs/:runId/training/console
  */
 export const fetchConsoleOutput = async (runId: string): Promise<string[]> => {
-  // TODO: Implement API call
-  // const response = await fetch(`${API_BASE_URL}/runs/${runId}/training/console`);
-  // return response.json();
-  
   return [];
 };
 
@@ -263,17 +171,6 @@ export const connectAttackWebSocket = (
   onMessage: (data: any) => void,
   onError?: (error: Event) => void
 ): WebSocket | null => {
-  // TODO: Implement WebSocket connection
-  // const ws = new WebSocket(`${WS_BASE_URL}/runs/${runId}/attack`);
-  // ws.onmessage = (event) => {
-  //   const data = JSON.parse(event.data);
-  //   onMessage(data);
-  // };
-  // ws.onerror = (error) => {
-  //   if (onError) onError(error);
-  // };
-  // return ws;
-  
   return null;
 };
 
@@ -286,17 +183,6 @@ export const connectDefenseWebSocket = (
   onMessage: (data: any) => void,
   onError?: (error: Event) => void
 ): WebSocket | null => {
-  // TODO: Implement WebSocket connection
-  // const ws = new WebSocket(`${WS_BASE_URL}/runs/${runId}/defense`);
-  // ws.onmessage = (event) => {
-  //   const data = JSON.parse(event.data);
-  //   onMessage(data);
-  // };
-  // ws.onerror = (error) => {
-  //   if (onError) onError(error);
-  // };
-  // return ws;
-  
   return null;
 };
 
@@ -309,16 +195,35 @@ export const connectRunStatusWebSocket = (
   onMessage: (data: any) => void,
   onError?: (error: Event) => void
 ): WebSocket | null => {
-  // TODO: Implement WebSocket connection
-  // const ws = new WebSocket(`${WS_BASE_URL}/runs/${runId}/status`);
-  // ws.onmessage = (event) => {
-  //   const data = JSON.parse(event.data);
-  //   onMessage(data);
-  // };
-  // ws.onerror = (error) => {
-  //   if (onError) onError(error);
-  // };
-  // return ws;
-  
   return null;
+};
+
+/**
+ * Subscribe to run updates via WebSocket
+ * @param runId
+ * @param onUpdate
+ */
+export const subscribeToRunUpdates = (runId: string, onUpdate: (data: any) => void) => {
+  const ws = new WebSocket(`${WS_BASE_URL}/${runId}`);
+
+  ws.onopen = () => {
+    console.log('Connected to WebSocket');
+  };
+
+  ws.onmessage = (event: MessageEvent) => {
+    const data = JSON.parse(event.data);
+    onUpdate(data);
+  };
+
+  ws.onclose = () => {
+    console.log('Disconnected from WebSocket');
+  };
+
+  ws.onerror = (error: Event) => {
+    console.error('WebSocket error:', error);
+  };
+
+  return () => {
+    ws.close();
+  };
 };
