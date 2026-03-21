@@ -18,13 +18,13 @@ The application is structured around three core areas:
 *   **Pattern Adherence**: Follow established patterns and conventions within the codebase. Before implementing new features, review existing components and utilities (e.g., in `src/components`, `src/services`, `src/utils`, `src/store`) to maintain consistency.
 *   **State Management**: Utilize Zustand (`src/store/appStore.ts`) for global state management. Ensure all state modifications are handled through the defined actions to maintain predictability.
 *   **API Integration**: Interact with the backend through the services defined in `src/services/api.ts`. Use WebSockets for real-time data.
-*   **Component Reusability**: Prioritize the use of existing components (e.g., `BackendConfigForm` in `src/components/common`) to ensure consistency and reduce development time.
+*   **Component Reusability**: Prioritize the use of existing components (`src/components/`) to ensure consistency and reduce development time.
 
 ## Architectural Memory
 
 To facilitate faster problem-solving and maintain context, architectural decisions, design patterns, and key ideas should be documented.
 
-*   **Location**: Store these notes in `/.github/memory/` directory.
+*   **Location**: Store these notes in `/.github/memories/` directory.
 *   **Format**: Use Markdown files (e.g., `architecture.md`, `design-patterns.md`).
 *   **Content**: Document the rationale behind architectural choices, explain complex components, and outline design patterns used.
 *   **Retrieval**: These notes will be used to provide context for new chat sessions, ensuring a consistent understanding of the project's architecture.

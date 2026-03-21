@@ -2,12 +2,10 @@ import React from 'react';
 import { ComponentLabel, ComponentType } from '../../types';
 
 interface CreateRunModalProps {
-  onClose: () => void;
-  onCreateRun: (name: string, description: string, components: ComponentType[]) => void;
   componentLabels: Record<ComponentType, ComponentLabel>;
 }
 
-const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, componentLabels }) =>{
+const CreateRunModal: React.FC<CreateRunModalProps> = ({ componentLabels }) =>{
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700">
@@ -56,7 +54,6 @@ const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, c
 
         <div className="flex justify-end gap-3">
           <button
-            onClick={onClose}
             className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded"
           >
             Cancel

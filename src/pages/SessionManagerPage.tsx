@@ -1,15 +1,14 @@
 import React from 'react';
 import { Plus, Upload, Copy, Zap, Shield, Brain, Database } from 'lucide-react';
 import { Run, RunTemplate, ComponentLabel, ComponentType } from '../types';
-import TemplateCard from '../components/session/TemplateCard';
-import CreateRunModal from '../components/session/CreateSessionModal';
+import TemplateCard from '../components/run/RunTemplateCard';
+import CreateRunModal from '../components/run/CreateRunModal';
 
 interface RunManagerPageProps {
-  onOpenRun: (run: Run) => void;
+  // onOpenRun: (run: Run) => void;
 }
 
-const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
-  const [showCreateModal, setShowCreateModal] = React.useState(false);
+const RunManagerPage: React.FC<RunManagerPageProps> = ({ /* onOpenRun */ }) => {
   const [showTemplates, setShowTemplates] = React.useState(false);
 
   const templates: RunTemplate[] = [
@@ -52,7 +51,7 @@ const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
         </div>
         <div className="flex gap-3">
           <button
-            onClick={() => setShowTemplates(!showTemplates)}
+            // onClick={() => setShowTemplates(!showTemplates)}
             className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded"
           >
             <Copy className="w-4 h-4" />
@@ -65,7 +64,7 @@ const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
           </button>
 
           <button
-            onClick={() => setShowCreateModal(true)}
+            // onClick={() => setShowCreateModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded"
           >
             <Plus className="w-4 h-4" />
@@ -119,11 +118,11 @@ const RunManagerPage: React.FC<RunManagerPageProps> = ({ onOpenRun }) => {
 
       {/* Create Run Modal */}
       {/* {showCreateModal && (
-        // <CreateRunModal
-        //   onClose={() => setShowCreateModal(false)}
-        //   onCreateRun={handleCreateRun}
-        //   componentLabels={componentLabels}
-        // />
+        <CreateRunModal
+          onClose={() => setShowCreateModal(false)}
+          onCreateRun={handleCreateRun}
+          componentLabels={componentLabels}
+        />
       )} */}
     </div>
   );
