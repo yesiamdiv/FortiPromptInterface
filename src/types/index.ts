@@ -1,94 +1,148 @@
-import { LucideIcon } from 'lucide-react';
+import { ForwardRefExoticComponent, RefAttributes } from 'react';
+import { LucideProps } from 'lucide-react';
 
-export type SessionStatus = 'running' | 'idle' | 'paused' | 'completed' | 'failed';
-// export type ComponentType = 'attack-testing' | 'defense-testing' | 'attack-training' | 'defense-training';
+// ─── Attack ───────────────────────────────────────────────────────────────────
+
+export type AttackStatus = 'success' | 'partial' | 'blocked' | 'running';
+
+export type AttackType =
+  | 'Direct Injection'
+  | 'Indirect Injection'
+  | 'Prompt Leaking'
+  | 'Jailbreak'
+  | 'Chain Attack'
+  | 'Role Play Exploit';
+
+export interface AttackConfig {
+  backendType: BackendType;
+  connectionUrl: string;
+  apiKey: string;
+  modelSelection: ModelSelection;
+  attackType: AttackType;
+  targetUrl: string;
+  attackRate: number;
+  maxIterations: number;
+  successThreshold: number;
+  initialAttackPrompt: string;
+  attackScenario: string;
+  targetInformation: string;
+}
+
+export interface AttackPrompt {
+  id: string;
+  prompt: string;
+  attackType: AttackType;
+  status: AttackStatus;
+  category: string;
+  score: number;
+  timestamp: string;
+}
+
+/** @deprecated use AttackPrompt */
+export type GeneratedPrompt = AttackPrompt;
+
+// ─── Backend / Model ──────────────────────────────────────────────────────────
+
+export type BackendType = 'Google Colab' | 'OpenAI' | 'Anthropic' | 'Custom API';
+
+export type ModelSelection =
+  | 'GPT-4o-mini'
+  | 'GPT-4o'
+  | 'claude-3-5-sonnet'
+  | 'claude-3-haiku'
+  | 'gemini-1.5-flash';
+
+export interface BackendConfig {
+  backendType: BackendType;
+  connectionUrl: string;
+  apiKey?: string;
+  modelSelection: ModelSelection;
+}
+
+// ─── Defense ─────────────────────────────────────────────────────────────────
+
+export interface DefenseLayer {
+  id: string;
+  name: string;
+  enabled: boolean;
+  strictness: number;
+}
+
+export interface DefenseLog {
+  id: string;
+  timestamp: string;
+  attackType: AttackType;
+  blocked: boolean;
+  score: number;
+  details: string;
+}
+
+export interface DefenseStats {
+  overallScore: number;
+  directInjection: number;
+  jailbreakResistance: number;
+  promptLeaking: number;
+  rolePlayExploits: number;
+  indirectInjection: number;
+}
+
+export interface DefenseBackendConfig {
+  systemPrompt: string;
+  guardrailLevel: number;
+  attackVectors: string;
+  layers: DefenseLayer[];
+}
+
+// ─── Storage ──────────────────────────────────────────────────────────────────
+
+export interface DataStorageConfig {
+  persistLogs: boolean;
+  exportFormat: 'json' | 'csv';
+  retentionDays: number;
+}
+
+// ─── Session / Run ────────────────────────────────────────────────────────────
+
 export type ComponentType = 'attack-testing' | 'defense-testing';
-export type AttackType = 'single' | 'chain';
-export type AttackStatus = 'success' | 'partial' | 'blocked';
-export type LogType = 'pass' | 'block';
 
 export interface ComponentLabel {
   name: string;
-  icon: LucideIcon;
+  icon: ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
   color: string;
 }
 
 export interface Run {
   id: string;
   name: string;
-  description: string;
+  description?: string;
+  status: 'idle' | 'running' | 'completed' | 'failed';
   components: ComponentType[];
-  status: SessionStatus;
-  lastActive: string;
-  created: string;
+  createdAt: string;
+  updatedAt: string;
+  attackConfig?: AttackConfig;
+  defenseConfig?: DefenseBackendConfig;
+  prompts?: AttackPrompt[];
+  defenseLogs?: DefenseLog[];
 }
 
 export interface RunTemplate {
+  id: string;
   name: string;
   description: string;
   components: ComponentType[];
+  attackConfig?: Partial<AttackConfig>;
+  defenseConfig?: Partial<DefenseBackendConfig>;
 }
 
-export interface AttackPrompt {
-  id: number;
-  type: AttackType;
-  timestamp: string;
-  status: AttackStatus;
-  prompts: string[];
-}
-
-export interface DefenseLog {
-  id: number;
-  type: LogType;
-  layer: string;
-  prompt: string;
-  result: string;
-  time: string;
-}
-
-// --- New Types ---
-
-export interface AttackConfig {
-  model: string;
-  temperature: number;
-  max_tokens: number;
-  prompts: string[];
-}
-
-export interface BackendConfig {
-  url: string;
-  apiKey?: string;
-}
-
-export interface DefenseLayer {
-  id: string;
-  type: string;
-  name: string;
-  enabled: boolean;
-  order: number;
-}
-
-export interface DefenseStats {
-  blockedAttacks: number;
-  passedLegitimate: number;
-  accuracy: number;
-}
-
-export interface DefenseBackendConfig {
-  url: string;
-}
-
-export interface DataStorageConfig {
-  type: 'local' | 'remote';
-  path?: string;
-}
+// ─── Evaluation ───────────────────────────────────────────────────────────────
 
 export interface EvaluationResult {
-  id: string;
   runId: string;
-  attackPrompt: string;
-  defenseResponse: string;
-  evaluation: string;
-  reasoning: string;
   timestamp: string;
+  totalPrompts: number;
+  successCount: number;
+  partialCount: number;
+  blockedCount: number;
+  averageScore: number;
+  defenseStats?: DefenseStats;
 }

@@ -1,170 +1,134 @@
+import { Zap, Shield } from 'lucide-react';
 import { create } from 'zustand';
 import {
   Run,
   AttackConfig,
   AttackPrompt,
   BackendConfig,
-  DefenseLayer,
   DefenseLog,
   DefenseStats,
   DefenseBackendConfig,
-  DataStorageConfig,  ComponentType,
-  ComponentLabel,} from '../types';
+  DataStorageConfig,
+  ComponentType,
+  ComponentLabel,
+} from '../types';
+
+// ─── Component label map ─────────────────────────────────────────────────────
+// Used by SessionCard, TemplateCard, SessionManagerPage
+export const componentLabels: Record<ComponentType, ComponentLabel> = {
+  'attack-testing': { name: 'Attack Testing', icon: Zap,    color: '#EF4444' },
+  'defense-testing': { name: 'Defense Testing', icon: Shield, color: '#22C55E' },
+};
+
+// ─── Store shape ──────────────────────────────────────────────────────────────
 
 interface AppState {
-  // Run Management
+  // Run management
   runs: Run[];
-  activeRun: Run | null;
-  currentView: 'run-manager' | 'run-workspace';
-  activeTab: ComponentType | 'overview';
+  activeRunId: string | null;
 
-  // Attack State
-  attackConfig: Partial<AttackConfig>;
-  attackBackendConfig: Partial<BackendConfig>;
-  attackRunning: boolean;
+  // Attack
+  attackConfig: AttackConfig | null;
   attackPrompts: AttackPrompt[];
-  attackProgress: {
-    current: number;
-    total: number;
-  };
+  isAttacking: boolean;
+  attackError: string | null;
 
-  // Defense State
-  defenseConfig: Partial<DefenseBackendConfig>;
-  defenseLayers: DefenseLayer[];
+  // Defense
+  defenseConfig: DefenseBackendConfig | null;
   defenseLogs: DefenseLog[];
-  defenseStats: DefenseStats;
-  defenseRunning: boolean;
-  dataStorageConfig: Partial<DataStorageConfig>;
+  defenseStats: DefenseStats | null;
+  isEvaluating: boolean;
+  defenseError: string | null;
 
-  // Actions - Run Management
+  // Backend / connection
+  backendConfig: BackendConfig | null;
+  connectionStatus: 'idle' | 'testing' | 'connected' | 'failed';
+
+  // Storage
+  storageConfig: DataStorageConfig | null;
+
+  // Actions — runs
   setRuns: (runs: Run[]) => void;
   addRun: (run: Run) => void;
-  updateRun: (id: string, updates: Partial<Run>) => void;
+  updateRun: (id: string, patch: Partial<Run>) => void;
   deleteRun: (id: string) => void;
-  setActiveRun: (run: Run | null) => void;
-  setCurrentView: (view: 'run-manager' | 'run-workspace') => void;
-  setActiveTab: (tab: ComponentType | 'overview') => void;
+  setActiveRun: (id: string | null) => void;
 
-  // Actions - Attack
-  setAttackConfig: (config: Partial<AttackConfig>) => void;
-  setAttackBackendConfig: (config: Partial<BackendConfig>) => void;
-  setAttackRunning: (running: boolean) => void;
-  addAttackPrompt: (prompt: AttackPrompt) => void;
+  // Actions — attack
+  setAttackConfig: (config: AttackConfig) => void;
   setAttackPrompts: (prompts: AttackPrompt[]) => void;
-  updateAttackProgress: (progress: { current: number; total: number }) => void;
+  addAttackPrompt: (prompt: AttackPrompt) => void;
+  clearAttackPrompts: () => void;
+  setIsAttacking: (v: boolean) => void;
+  setAttackError: (msg: string | null) => void;
 
-  // Actions - Defense
-  setDefenseConfig: (config: Partial<DefenseBackendConfig>) => void;
-  setDefenseLayers: (layers: DefenseLayer[]) => void;
-  toggleDefenseLayer: (id: string) => void;
-  addDefenseLog: (log: DefenseLog) => void;
+  // Actions — defense
+  setDefenseConfig: (config: DefenseBackendConfig) => void;
   setDefenseLogs: (logs: DefenseLog[]) => void;
-  clearDefenseLogs: () => void;
+  addDefenseLog: (log: DefenseLog) => void;
   setDefenseStats: (stats: DefenseStats) => void;
-  setDefenseRunning: (running: boolean) => void;
-  setDataStorageConfig: (config: Partial<DataStorageConfig>) => void;
+  setIsEvaluating: (v: boolean) => void;
+  setDefenseError: (msg: string | null) => void;
+
+  // Actions — backend
+  setBackendConfig: (config: BackendConfig) => void;
+  setConnectionStatus: (s: 'idle' | 'testing' | 'connected' | 'failed') => void;
+
+  // Actions — storage
+  setStorageConfig: (config: DataStorageConfig) => void;
 }
 
+// ─── Store ────────────────────────────────────────────────────────────────────
+
 export const useAppStore = create<AppState>((set) => ({
-  // Initial State - Run Management
   runs: [],
-  activeRun: null,
-  currentView: 'run-manager',
-  activeTab: 'overview',
+  activeRunId: null,
 
-  // Initial State - Attack
-  attackConfig: {},
-  attackBackendConfig: {},
-  attackRunning: false,
+  attackConfig: null,
   attackPrompts: [],
-  attackProgress: { current: 0, total: 0 },
+  isAttacking: false,
+  attackError: null,
 
-  // Initial State - Defense
-  defenseConfig: {},
-  defenseLayers: [
-    {
-      id: '1',
-      type: 'input-sanitizer',
-      name: 'Input Sanitizer',
-      enabled: true,
-      order: 1,
-    },
-    {
-      id: '2',
-      type: 'semantic-filter',
-      name: 'Semantic Filter',
-      enabled: true,
-      order: 2,
-    },
-    {
-      id: '3',
-      type: 'regex-scanner',
-      name: 'Regex Scanner',
-      enabled: true,
-      order: 3,
-    },
-    {
-      id: '4',
-      type: 'context-validator',
-      name: 'Context Validator',
-      enabled: true,
-      order: 4,
-    },
-    {
-      id: '5',
-      type: 'output-filter',
-      name: 'Output Filter',
-      enabled: true,
-      order: 5,
-    },
-  ],
+  defenseConfig: null,
   defenseLogs: [],
-  defenseStats: {
-    blockedAttacks: 0,
-    passedLegitimate: 0,
-    accuracy: 0,
-  },
-  defenseRunning: false,
-  dataStorageConfig: {},
+  defenseStats: null,
+  isEvaluating: false,
+  defenseError: null,
 
-  // Actions - Run Management
+  backendConfig: null,
+  connectionStatus: 'idle',
+
+  storageConfig: null,
+
+  // Runs
   setRuns: (runs) => set({ runs }),
-  addRun: (run) => set((state) => ({ runs: [...state.runs, run] })),
-  updateRun: (id, updates) =>
-    set((state) => ({
-      runs: state.runs.map((run) => (run.id === id ? { ...run, ...updates } : run)),
-    })),
-  deleteRun: (id) => set((state) => ({ runs: state.runs.filter((run) => run.id !== id) })),
-  setActiveRun: (run) => set({ activeRun: run }),
-  setCurrentView: (view) => set({ currentView: view }),
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  addRun: (run) => set((s) => ({ runs: [...s.runs, run] })),
+  updateRun: (id, patch) =>
+    set((s) => ({ runs: s.runs.map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
+  deleteRun: (id) => set((s) => ({ runs: s.runs.filter((r) => r.id !== id) })),
+  setActiveRun: (activeRunId) => set({ activeRunId }),
 
-  // Actions - Attack
-  setAttackConfig: (config) =>
-    set((state) => ({ attackConfig: { ...state.attackConfig, ...config } })),
-  setAttackBackendConfig: (config) =>
-    set((state) => ({ attackBackendConfig: { ...state.attackBackendConfig, ...config } })),
-  setAttackRunning: (running) => set({ attackRunning: running }),
+  // Attack
+  setAttackConfig: (attackConfig) => set({ attackConfig }),
+  setAttackPrompts: (attackPrompts) => set({ attackPrompts }),
   addAttackPrompt: (prompt) =>
-    set((state) => ({ attackPrompts: [...state.attackPrompts, prompt] })),
-  setAttackPrompts: (prompts) => set({ attackPrompts: prompts }),
-  updateAttackProgress: (progress) => set({ attackProgress: progress }),
+    set((s) => ({ attackPrompts: [...s.attackPrompts, prompt] })),
+  clearAttackPrompts: () => set({ attackPrompts: [] }),
+  setIsAttacking: (isAttacking) => set({ isAttacking }),
+  setAttackError: (attackError) => set({ attackError }),
 
-  // Actions - Defense
-  setDefenseConfig: (config) =>
-    set((state) => ({ defenseConfig: { ...state.defenseConfig, ...config } })),
-  setDefenseLayers: (layers) => set({ defenseLayers: layers }),
-  toggleDefenseLayer: (id) =>
-    set((state) => ({
-      defenseLayers: state.defenseLayers.map((layer) =>
-        layer.id === id ? { ...layer, enabled: !layer.enabled } : layer
-      ),
-    })),
-  addDefenseLog: (log) => set((state) => ({ defenseLogs: [log, ...state.defenseLogs] })),
-  setDefenseLogs: (logs) => set({ defenseLogs: logs }),
-  clearDefenseLogs: () => set({ defenseLogs: [] }),
-  setDefenseStats: (stats) => set({ defenseStats: stats }),
-  setDefenseRunning: (running) => set({ defenseRunning: running }),
-  setDataStorageConfig: (config) =>
-    set((state) => ({ dataStorageConfig: { ...state.dataStorageConfig, ...config } })),
+  // Defense
+  setDefenseConfig: (defenseConfig) => set({ defenseConfig }),
+  setDefenseLogs: (defenseLogs) => set({ defenseLogs }),
+  addDefenseLog: (log) => set((s) => ({ defenseLogs: [...s.defenseLogs, log] })),
+  setDefenseStats: (defenseStats) => set({ defenseStats }),
+  setIsEvaluating: (isEvaluating) => set({ isEvaluating }),
+  setDefenseError: (defenseError) => set({ defenseError }),
+
+  // Backend
+  setBackendConfig: (backendConfig) => set({ backendConfig }),
+  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
+
+  // Storage
+  setStorageConfig: (storageConfig) => set({ storageConfig }),
 }));

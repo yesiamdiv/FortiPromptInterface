@@ -53,8 +53,8 @@ const RunCard: React.FC<RunCardProps> = ({ run, componentLabels, onOpenRun }) =>
 
         {/* Metadata */}
         <div className="flex gap-4 text-xs text-slate-500">
-          <span>Created: {run.created}</span>
-          <span>Last active: {run.lastActive}</span>
+          <span>Created: {run.createdAt}</span>
+          <span>Last active: {run.updatedAt}</span>
         </div>
       </div>
 
