@@ -1,128 +1,203 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AttackConfig,
-  AttackType,
-  BackendType,
-  ModelSelection,
   AttackPrompt,
   AttackStatus,
+  AttackStrategy,
+  AttackDomain,
 } from '../types';
 import { useAppStore } from '../store/appStore';
-import { testConnection, startAttack, stopAttack } from '../services/api';
-import { generateRunId, nowISO } from '../utils/run';
+import { testConnection, startAttack, stopAttack, updateAttackConfig } from '../services/api';
+import {
+  fetchAttackPrompts,
+  fetchAttackStats,
+} from '../services/api';
+import { websocketService } from 'services/websocket';
 
 interface AttackTestingPageProps {
   onBack: () => void;
 }
 
+// Simplified status config - only showing statuses, not filtering by them
 const STATUS_CONFIG: Record<AttackStatus, { label: string; bg: string; color: string; dot: string }> = {
-  success: { label: 'Success', bg: '#FEF2F2', color: '#DC2626', dot: '#EF4444' },
-  partial:  { label: 'Partial',  bg: '#FFFBEB', color: '#B45309', dot: '#F59E0B' },
-  blocked:  { label: 'Blocked',  bg: '#F0FDF4', color: '#15803D', dot: '#22C55E' },
-  running:  { label: 'Running',  bg: '#EFF6FF', color: '#1D4ED8', dot: '#3B82F6' },
+  generated: { label: 'Generated', bg: '#EFF6FF', color: '#1D4ED8', dot: '#3B82F6' },
+  sent:      { label: 'Sent',      bg: '#FFFBEB', color: '#B45309', dot: '#F59E0B' },
+  failed:    { label: 'Failed',    bg: '#FEF2F2', color: '#DC2626', dot: '#EF4444' },
+  breached:  { label: 'Breached',  bg: '#FEF2F2', color: '#991B1B', dot: '#DC2626' },
+  blocked:   { label: 'Blocked',   bg: '#F0FDF4', color: '#15803D', dot: '#22C55E' },
 };
 
 const DEFAULT_CONFIG: AttackConfig = {
-  backendType: 'Google Colab',
-  connectionUrl: '',
-  apiKey: '',
-  modelSelection: 'GPT-4o-mini',
-  attackType: 'Direct Injection',
-  targetUrl: 'https://api.target.com/chat',
-  attackRate: 1.0,
-  maxIterations: 100,
-  successThreshold: 0.70,
-  initialAttackPrompt: '',
-  attackScenario: '',
-  targetInformation: '',
+  model: 'dolphin-mistral:7b',
+  attackStrategy: 'default',
+  domain: 'cybersecurity',
+  modelUrl: 'http://localhost:11434/api/generate',
+  iterations: 100,
+  parameters: {
+    temperature: 0.7,
+    engine: 'ollama',
+  },
 };
+
+const ATTACK_STRATEGIES: { value: AttackStrategy; label: string }[] = [
+  { value: 'default',            label: 'Default'            },
+  { value: 'jailbreak',          label: 'Jailbreak'          },
+  { value: 'prompt_injection',   label: 'Prompt Injection'   },
+  { value: 'indirect_injection', label: 'Indirect Injection' },
+  { value: 'prompt_leaking',     label: 'Prompt Leaking'     },
+  { value: 'chain_attack',       label: 'Chain Attack'       },
+  { value: 'role_play_exploit',  label: 'Role Play Exploit'  },
+];
+
+const DOMAINS: { value: AttackDomain; label: string }[] = [
+  { value: 'copyright',      label: 'Copyright'      },
+  { value: 'cybersecurity',  label: 'Cybersecurity'  },
+  { value: 'harassment',     label: 'Harassment'     },
+  { value: 'harmful',        label: 'Harmful'        },
+  { value: 'illegal',        label: 'Illegal'        },
+  { value: 'misinformation', label: 'Misinformation' },
+];
+
+// Model options with engine and model
+const MODEL_OPTIONS = [
+  { engine: 'ollama', model: 'dolphin-mistral:7b', label: 'Ollama - Dolphin Mistral 7B' },
+  { engine: 'ollama', model: 'llama2:7b', label: 'Ollama - Llama 2 7B' },
+  { engine: 'openai', model: 'gpt-4o-mini', label: 'OpenAI - GPT-4o Mini' },
+  { engine: 'openai', model: 'gpt-4o', label: 'OpenAI - GPT-4o' },
+  { engine: 'anthropic', model: 'claude-3-5-sonnet-20241022', label: 'Anthropic - Claude 3.5 Sonnet' },
+];
 
 const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
   // Local UI state
-  const [config, setConfig] = useState<AttackConfig>(DEFAULT_CONFIG);
+  const [config, setConfig]     = useState<AttackConfig>(DEFAULT_CONFIG);
+  const [apiKey, setApiKey]     = useState('');
   const [activeTab, setActiveTab] = useState<'attack' | 'defense'>('attack');
-  const [filter, setFilter] = useState<'all' | AttackStatus>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Global store — read
   const activeRunId      = useAppStore(s => s.activeRunId);
   const attackPrompts    = useAppStore(s => s.attackPrompts);
+  const attackStats      = useAppStore(s => s.attackStats);
   const isAttacking      = useAppStore(s => s.isAttacking);
   const attackError      = useAppStore(s => s.attackError);
   const connectionStatus = useAppStore(s => s.connectionStatus);
 
   // Global store — write
   const setAttackConfig     = useAppStore(s => s.setAttackConfig);
-  const setAttackPrompts    = useAppStore(s => s.setAttackPrompts);
   const clearAttackPrompts  = useAppStore(s => s.clearAttackPrompts);
   const setIsAttacking      = useAppStore(s => s.setIsAttacking);
   const setAttackError      = useAppStore(s => s.setAttackError);
   const setConnectionStatus = useAppStore(s => s.setConnectionStatus);
-  const addRun              = useAppStore(s => s.addRun);
-  const setActiveRun        = useAppStore(s => s.setActiveRun);
   const updateRun           = useAppStore(s => s.updateRun);
 
-  // Derived
-  const filtered  = filter === 'all' ? attackPrompts : attackPrompts.filter(p => p.status === filter);
-  const avgScore  = attackPrompts.length > 0
-    ? (attackPrompts.reduce((a, p) => a + p.score, 0) / attackPrompts.length).toFixed(2)
-    : '—';
-
-  const update = (key: keyof AttackConfig, val: unknown) =>
+  const update = <K extends keyof AttackConfig>(key: K, val: AttackConfig[K]) =>
     setConfig(prev => ({ ...prev, [key]: val }));
 
-  // ── Test connection ────────────────────────────────────────────────────────
+  const updateParam = (key: string, val: unknown) =>
+    setConfig(prev => ({ ...prev, parameters: { ...prev.parameters, [key]: val } }));
+
+  // Handle model selection - sets both engine and model
+  const handleModelSelect = (selectedModel: typeof MODEL_OPTIONS[0]) => {
+    setConfig(prev => ({
+      ...prev,
+      model: selectedModel.model,
+      parameters: {
+        ...prev.parameters,
+        engine: selectedModel.engine,
+      },
+    }));
+  };
+
+  // Get current selected model option
+  const currentModelOption = MODEL_OPTIONS.find(
+    opt => opt.model === config.model && opt.engine === config.parameters?.engine
+  ) || MODEL_OPTIONS[0];
+
+  // ── Test connection ─────────────────────────────────────────────────────────
   const handleTestConnection = async () => {
-    if (!config.connectionUrl) return;
+    if (!config.modelUrl) return;
     setConnectionStatus('testing');
-    const ok = await testConnection(config.connectionUrl, config.apiKey || undefined);
+    const ok = await testConnection(config.modelUrl, apiKey || undefined);
     setConnectionStatus(ok ? 'connected' : 'failed');
   };
 
-  // ── Start attack ──────────────────────────────────────────────────────────
+  // ── Start attack ────────────────────────────────────────────────────────────
   const handleStart = async () => {
+    if (!activeRunId) return;
     setAttackError(null);
     clearAttackPrompts();
 
-    let runId = activeRunId;
-    if (!runId) {
-      runId = generateRunId();
-      addRun({
-        id: runId,
-        name: `Attack – ${new Date().toLocaleTimeString()}`,
-        status: 'running',
-        components: ['attack-testing'],
-        createdAt: nowISO(),
-        updatedAt: nowISO(),
-      });
-      setActiveRun(runId);
-    } else {
-      updateRun(runId, { status: 'running', updatedAt: nowISO() });
-    }
-
     setAttackConfig(config);
     setIsAttacking(true);
+    updateRun(activeRunId, { status: 'running', updatedAt: new Date().toISOString() });
 
     try {
-      const prompts = await startAttack(runId, config);
-      setAttackPrompts(prompts);
-      updateRun(runId, { status: 'completed', updatedAt: nowISO(), prompts });
+      await updateAttackConfig(activeRunId, config, apiKey || undefined);
+      await startAttack(activeRunId, { resumeFromLastSaved: false }, apiKey || undefined);
+      // Prompts arrive via WebSocket — nothing more to do here
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Attack failed';
       setAttackError(msg);
-      updateRun(runId, { status: 'failed', updatedAt: nowISO() });
-    } finally {
       setIsAttacking(false);
+      updateRun(activeRunId, { status: 'failed', updatedAt: new Date().toISOString() });
     }
   };
 
-  // ── Stop attack ───────────────────────────────────────────────────────────
+  // ── Stop attack ─────────────────────────────────────────────────────────────
   const handleStop = async () => {
     if (!activeRunId) return;
     try { await stopAttack(activeRunId); } catch { /* best-effort */ }
     setIsAttacking(false);
-    updateRun(activeRunId, { status: 'completed', updatedAt: nowISO() });
+    updateRun(activeRunId, { status: 'paused', updatedAt: new Date().toISOString() });
   };
+
+  // ── Initial data fetch ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    const init = async () => {
+      try {
+        console.log('[INIT] Fetching existing prompts & stats');
+
+        const [prompts, stats] = await Promise.all([
+          fetchAttackPrompts(activeRunId),
+          fetchAttackStats(activeRunId),
+        ]);
+
+        const { setAttackPrompts, setAttackStats, updateRun, setIsAttacking } = useAppStore.getState();
+
+        setAttackPrompts(prompts || []);
+        setAttackStats(stats || null);
+
+        // Sync attacking state from stats
+        const isRunning = stats?.pendingAttacks > 0;
+        setIsAttacking(isRunning);
+
+        updateRun(activeRunId, {
+          status: isRunning ? 'running' : 'completed',
+          updatedAt: new Date().toISOString(),
+        });
+
+      } catch (err) {
+        console.error('[INIT] Failed to load attack state', err);
+      }
+    };
+
+    init();
+  }, [activeRunId]);
+
+  // ── WebSocket subscription ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    websocketService.joinRun(activeRunId);
+
+    return () => {
+      websocketService.leaveRun(activeRunId);
+    };
+  }, [activeRunId]);
+
+  const isRunning = attackStats && attackStats.pendingAttacks > 0;
 
   return (
     <div className="at-root">
@@ -156,8 +231,6 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
         .at-sel,.at-inp{height:36px;background:#F7F6F3;border:1px solid #E8E6E0;border-radius:7px;padding:0 12px;font-size:13px;font-family:inherit;color:#1A1A1A;outline:none;transition:border-color .15s;width:100%}
         .at-sel{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23999' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
         .at-sel:focus,.at-inp:focus{border-color:#1A1A1A;background:#fff}
-        .at-ta{width:100%;background:#F7F6F3;border:1px solid #E8E6E0;border-radius:7px;padding:10px 12px;font-size:13px;font-family:inherit;color:#1A1A1A;outline:none;resize:vertical;min-height:82px;line-height:1.55;transition:border-color .15s}
-        .at-ta:focus{border-color:#1A1A1A;background:#fff}
         .at-slider-wrap{display:flex;flex-direction:column;gap:6px}
         .at-slider-hd{display:flex;justify-content:space-between;align-items:center}
         .at-slider-val{font-family:'DM Mono',monospace;font-size:12px;font-weight:500}
@@ -177,10 +250,6 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
         .at-conn-fail{font-size:11px;color:#DC2626;background:#FEF2F2;padding:3px 8px;border-radius:20px;font-weight:500}
         .at-error-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:7px;font-size:12px;color:#DC2626;margin-bottom:12px}
         .at-full{grid-column:1/-1}
-        .at-tbl-filters{display:flex;gap:8px;align-items:center}
-        .at-f-btn{height:28px;padding:0 12px;border-radius:20px;border:1px solid #E8E6E0;background:transparent;font-family:inherit;font-size:12px;color:#888;cursor:pointer;transition:all .15s}
-        .at-f-btn:hover{border-color:#999;color:#444}
-        .at-f-btn.on{background:#1A1A1A;color:#fff;border-color:#1A1A1A}
         .at-table{width:100%;border-collapse:collapse;font-size:13px}
         .at-table th{text-align:left;padding:10px 16px;font-size:11px;font-weight:500;color:#BBB;letter-spacing:.3px;text-transform:uppercase;border-bottom:1px solid #F0EDE6;background:#FAFAF9;white-space:nowrap}
         .at-table td{padding:12px 16px;border-bottom:1px solid #F9F8F6;vertical-align:middle}
@@ -189,14 +258,8 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
         .at-table tr.data{cursor:pointer}
         .at-st-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
         .at-st-dot{width:5px;height:5px;border-radius:50%}
-        .at-prompt-txt{font-family:'DM Mono',monospace;font-size:11px;color:#666;max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+        .at-prompt-txt{font-family:'DM Mono',monospace;font-size:11px;color:#666;max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
         tr.expanded .at-prompt-txt{white-space:normal}
-        .at-type-tag{display:inline-block;padding:2px 8px;background:#F0EDE6;border-radius:4px;font-size:11px;color:#666;white-space:nowrap}
-        .at-cat{font-size:11px;color:#999}
-        .at-score-bar{display:flex;align-items:center;gap:8px}
-        .at-score-track{width:56px;height:4px;background:#E8E6E0;border-radius:2px}
-        .at-score-fill{height:100%;border-radius:2px}
-        .at-score-num{font-family:'DM Mono',monospace;font-size:12px;color:#666}
         .at-ts{font-family:'DM Mono',monospace;font-size:11px;color:#CCC}
         .at-idx{font-family:'DM Mono',monospace;font-size:11px;color:#DDD}
         .at-tbl-empty{text-align:center;padding:48px 20px;color:#CCC;font-size:13px}
@@ -204,9 +267,11 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
         .at-sum-item{display:flex;align-items:center;gap:6px;font-size:12px;color:#999}
         .at-sum-dot{width:6px;height:6px;border-radius:50%}
         .at-sum-count{font-family:'DM Mono',monospace;font-weight:500;color:#1A1A1A}
-        .at-avg{margin-left:auto;font-family:'DM Mono',monospace;font-size:12px;color:#CCC}
+        .at-stats-row{display:flex;gap:16px;margin-left:auto;font-family:'DM Mono',monospace;font-size:11px;color:#999}
+        .at-stats-val{color:#1A1A1A;font-weight:500}
         @keyframes spin{to{transform:rotate(360deg)}}
         .at-spinner{animation:spin .8s linear infinite}
+        .at-no-run{display:flex;align-items:center;justify-content:center;padding:80px 24px;color:#CCC;font-size:14px;grid-column:1/-1}
       `}</style>
 
       {/* Nav */}
@@ -218,10 +283,12 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
           </button>
           <div className="at-nav-sep" />
           <span className="at-logo">FortiPrompt</span>
-          <div className="at-run-badge">
-            <span className="at-run-dot" />
-            {activeRunId ? `Run: ${activeRunId.slice(-6)}` : 'RAG Jailbreak Testing'}
-          </div>
+          {activeRunId && (
+            <div className="at-run-badge">
+              <span className="at-run-dot" />
+              Run: {activeRunId.slice(-8)}
+            </div>
+          )}
         </div>
         <div className="at-tab-group">
           <button className={`at-tab ${activeTab === 'attack' ? 'active' : ''}`} onClick={() => setActiveTab('attack')}>Attack Testing</button>
@@ -229,246 +296,283 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack }) => {
         </div>
       </nav>
 
-      <div className="at-main">
-        {/* LEFT */}
-        <div className="at-col">
-          {/* Backend */}
-          <div className="at-card">
-            <div className="at-card-hd">
-              <div>
-                <div className="at-card-title">Attacker Backend</div>
-                <div className="at-card-sub">Connect to your LLM backend</div>
-              </div>
-              {connectionStatus === 'connected' && <span className="at-conn-ok">● Connected</span>}
-              {connectionStatus === 'failed'    && <span className="at-conn-fail">✕ Failed</span>}
-            </div>
-            <div className="at-card-bd">
-              <div className="at-form-row">
-                <div className="at-form-grp">
-                  <label className="at-lbl">Backend Type</label>
-                  <select className="at-sel" value={config.backendType} onChange={e => update('backendType', e.target.value as BackendType)}>
-                    {(['Google Colab','OpenAI','Anthropic','Custom API'] as BackendType[]).map(b => <option key={b}>{b}</option>)}
-                  </select>
+      {!activeRunId ? (
+        <div className="at-no-run">
+          No active run selected — go back to the dashboard and open a run first.
+        </div>
+      ) : (
+        <div className="at-main">
+          {/* LEFT COL - CONSOLIDATED Attack Configuration */}
+          <div className="at-col">
+            <div className="at-card">
+              <div className="at-card-hd">
+                <div>
+                  <div className="at-card-title">Attack Configuration</div>
+                  <div className="at-card-sub">Configure model, backend, and attack parameters</div>
                 </div>
-                <div className="at-form-grp">
-                  <label className="at-lbl">Model</label>
-                  <select className="at-sel" value={config.modelSelection} onChange={e => update('modelSelection', e.target.value as ModelSelection)}>
-                    {(['GPT-4o-mini','GPT-4o','claude-3-5-sonnet','claude-3-haiku','gemini-1.5-flash'] as ModelSelection[]).map(m => <option key={m}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="at-form-row">
-                <div className="at-form-grp full">
-                  <label className="at-lbl">Connection URL</label>
-                  <input className="at-inp" placeholder="https://your-backend.com/api" value={config.connectionUrl} onChange={e => update('connectionUrl', e.target.value)} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {connectionStatus === 'connected' && <span className="at-conn-ok">● Connected</span>}
+                  {connectionStatus === 'failed'    && <span className="at-conn-fail">✕ Failed</span>}
+                  <button
+                    className={`at-btn-start ${isRunning ? 'stop' : ''}`}
+                    onClick={isRunning ? handleStop : handleStart}
+                    disabled={!isRunning && !config.modelUrl}
+                    title={!isRunning && !config.modelUrl ? 'Enter a Model URL first' : undefined}
+                  >
+                    {isRunning ? 'Stop' : 'Start Attack'}
+                  </button>
                 </div>
               </div>
-              <div className="at-form-row" style={{ marginBottom: 16 }}>
-                <div className="at-form-grp full">
-                  <label className="at-lbl">API Key (Optional)</label>
-                  <input className="at-inp" type="password" placeholder="sk-..." value={config.apiKey} onChange={e => update('apiKey', e.target.value)} />
-                </div>
-              </div>
-              <button
-                className={`at-btn-test ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'failed' ? 'failed' : ''}`}
-                onClick={handleTestConnection}
-                disabled={connectionStatus === 'testing' || !config.connectionUrl}
-              >
-                {connectionStatus === 'testing' && (
-                  <svg className="at-spinner" width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" strokeDasharray="9 5" strokeLinecap="round"/>
-                  </svg>
-                )}
-                {connectionStatus === 'connected' ? '✓ Connection verified'
-                  : connectionStatus === 'failed'  ? '✕ Retry connection'
-                  : connectionStatus === 'testing' ? 'Testing…'
-                  : 'Test Connection'}
-              </button>
-            </div>
-          </div>
-
-          {/* Attack Config */}
-          <div className="at-card">
-            <div className="at-card-hd">
-              <div>
-                <div className="at-card-title">Attack Configuration</div>
-                <div className="at-card-sub">Define attack parameters</div>
-              </div>
-              <button
-                className={`at-btn-start ${isAttacking ? 'stop' : ''}`}
-                onClick={isAttacking ? handleStop : handleStart}
-                disabled={!isAttacking && connectionStatus !== 'connected'}
-                title={!isAttacking && connectionStatus !== 'connected' ? 'Connect to a backend first' : undefined}
-              >
-                {isAttacking ? (
-                  <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1.5" y="1.5" width="2.5" height="7" fill="white" rx=".5"/><rect x="6" y="1.5" width="2.5" height="7" fill="white" rx=".5"/></svg>Stop</>
-                ) : (
-                  <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 1.5L8.5 5L2 8.5V1.5Z" fill="white"/></svg>Start Attack</>
-                )}
-              </button>
-            </div>
-            <div className="at-card-bd">
-              {attackError && (
-                <div className="at-error-bar">
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 4.5V7M7 9.5V10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
-                  {attackError}
-                </div>
-              )}
-              <div className="at-form-row">
-                <div className="at-form-grp">
-                  <label className="at-lbl">Attack Type</label>
-                  <select className="at-sel" value={config.attackType} onChange={e => update('attackType', e.target.value as AttackType)}>
-                    {(['Direct Injection','Indirect Injection','Prompt Leaking','Jailbreak','Chain Attack','Role Play Exploit'] as AttackType[]).map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div className="at-form-grp">
-                  <label className="at-lbl">Target URL / API</label>
-                  <input className="at-inp" placeholder="https://api.target.com/chat" value={config.targetUrl} onChange={e => update('targetUrl', e.target.value)} />
-                </div>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <div className="at-slider-wrap">
-                  <div className="at-slider-hd">
-                    <label className="at-lbl">Attack Rate (req/s)</label>
-                    <span className="at-slider-val">{config.attackRate.toFixed(1)}</span>
+              <div className="at-card-bd">
+                {attackError && (
+                  <div className="at-error-bar">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 4.5V7M7 9.5V10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+                    {attackError}
                   </div>
-                  <input type="range" className="at-range" min={0.1} max={10} step={0.1} value={config.attackRate} onChange={e => update('attackRate', parseFloat(e.target.value))} />
+                )}
+
+                {/* Model & Engine */}
+                <div className="at-form-row">
+                  <div className="at-form-grp full">
+                    <label className="at-lbl">Model & Engine</label>
+                    <select 
+                      className="at-sel" 
+                      value={`${currentModelOption.engine}:${currentModelOption.model}`}
+                      onChange={e => {
+                        const [engine, ...modelParts] = e.target.value.split(':');
+                        const model = modelParts.join(':');
+                        const selected = MODEL_OPTIONS.find(opt => opt.engine === engine && opt.model === model);
+                        if (selected) handleModelSelect(selected);
+                      }}
+                    >
+                      {MODEL_OPTIONS.map(opt => (
+                        <option key={`${opt.engine}:${opt.model}`} value={`${opt.engine}:${opt.model}`}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              </div>
-              <div className="at-form-row" style={{ marginBottom: 0 }}>
-                <div className="at-form-grp">
-                  <label className="at-lbl">Max Iterations</label>
-                  <input className="at-inp" type="number" value={config.maxIterations} onChange={e => update('maxIterations', parseInt(e.target.value))} />
+
+                {/* Strategy & Domain */}
+                <div className="at-form-row">
+                  <div className="at-form-grp">
+                    <label className="at-lbl">Attack Strategy</label>
+                    <select className="at-sel" value={config.attackStrategy} onChange={e => update('attackStrategy', e.target.value as AttackStrategy)}>
+                      {ATTACK_STRATEGIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="at-form-grp">
+                    <label className="at-lbl">Domain</label>
+                    <select className="at-sel" value={config.domain} onChange={e => update('domain', e.target.value as AttackDomain)}>
+                      {DOMAINS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div className="at-form-grp">
-                  <div className="at-slider-wrap">
-                    <div className="at-slider-hd">
-                      <label className="at-lbl">Success Threshold</label>
-                      <span className="at-slider-val">{config.successThreshold.toFixed(2)}</span>
+
+                {/* Model URL */}
+                <div className="at-form-row">
+                  <div className="at-form-grp full">
+                    <label className="at-lbl">Model URL</label>
+                    <input className="at-inp" placeholder="http://localhost:11434/api/generate" value={config.modelUrl} onChange={e => update('modelUrl', e.target.value)} />
+                  </div>
+                </div>
+
+                {/* API Key */}
+                <div className="at-form-row">
+                  <div className="at-form-grp full">
+                    <label className="at-lbl">API Key (Optional)</label>
+                    <input className="at-inp" type="password" placeholder="sk-..." value={apiKey} onChange={e => setApiKey(e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Test Connection Button */}
+                <div style={{ marginBottom: 16 }}>
+                  <button
+                    className={`at-btn-test ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'failed' ? 'failed' : ''}`}
+                    onClick={handleTestConnection}
+                    disabled={connectionStatus === 'testing' || !config.modelUrl}
+                  >
+                    {connectionStatus === 'testing' && (
+                      <svg className="at-spinner" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" strokeDasharray="9 5" strokeLinecap="round"/>
+                      </svg>
+                    )}
+                    {connectionStatus === 'connected' ? '✓ Connection verified'
+                      : connectionStatus === 'failed'  ? '✕ Retry connection'
+                      : connectionStatus === 'testing' ? 'Testing…'
+                      : 'Test Connection'}
+                  </button>
+                </div>
+
+                {/* Iterations & Temperature */}
+                <div className="at-form-row" style={{ marginBottom: 0 }}>
+                  <div className="at-form-grp">
+                    <label className="at-lbl">Iterations</label>
+                    <input
+                      className="at-inp"
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={config.iterations}
+                      onChange={e => update('iterations', parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div className="at-form-grp">
+                    <div className="at-slider-wrap">
+                      <div className="at-slider-hd">
+                        <label className="at-lbl">Temperature</label>
+                        <span className="at-slider-val">{(config.parameters?.temperature ?? 0.7).toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        className="at-range"
+                        min={0} max={2} step={0.01}
+                        value={config.parameters?.temperature ?? 0.7}
+                        onChange={e => updateParam('temperature', parseFloat(e.target.value))}
+                      />
                     </div>
-                    <input type="range" className="at-range" min={0} max={1} step={0.01} value={config.successThreshold} onChange={e => update('successThreshold', parseFloat(e.target.value))} />
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* RIGHT */}
-        <div className="at-col">
-          <div className="at-card">
+          {/* RIGHT COL — Stats card */}
+          <div className="at-col">
+            <div className="at-card">
+              <div className="at-card-hd">
+                <div>
+                  <div className="at-card-title">Attack Statistics</div>
+                  <div className="at-card-sub">Live progress for this run</div>
+                </div>
+              </div>
+              <div className="at-card-bd" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {attackStats ? (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      {[
+                        { label: 'Total',     val: attackStats.totalPrompts    },
+                        { label: 'Generated', val: attackStats.attacksGenerated },
+                        { label: 'Pending',   val: attackStats.pendingAttacks  },
+                      ].map(({ label, val }) => (
+                        <div key={label} style={{ background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 8, padding: '12px 14px' }}>
+                          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 22, fontWeight: 500, color: '#1A1A1A' }}>{val}</div>
+                          <div style={{ fontSize: 11, color: '#BBB', marginTop: 2, textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {attackStats.totalPrompts > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 11, color: '#999' }}>
+                          <span>Progress</span>
+                          <span style={{ fontFamily: "'DM Mono', monospace" }}>
+                            {Math.round((attackStats.attacksGenerated / attackStats.totalPrompts) * 100)}%
+                          </span>
+                        </div>
+                        <div style={{ height: 4, background: '#E8E6E0', borderRadius: 2 }}>
+                          <div style={{
+                            height: '100%',
+                            width: `${(attackStats.attacksGenerated / attackStats.totalPrompts) * 100}%`,
+                            background: '#1A1A1A',
+                            borderRadius: 2,
+                            transition: 'width .4s ease',
+                          }} />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ textAlign: 'center', color: '#CCC', fontSize: 13, padding: '24px 0' }}>
+                    {isAttacking ? 'Waiting for first stat update…' : 'Start an attack to see live statistics'}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* FULL-WIDTH — Prompt table (No filter buttons, only "All" view) */}
+          <div className="at-card at-full">
             <div className="at-card-hd">
               <div>
-                <div className="at-card-title">Prompt &amp; Scenario</div>
-                <div className="at-card-sub">Define what to test and extract</div>
+                <div className="at-card-title">Generated Attack Prompts</div>
+                <div className="at-card-sub">
+                  {isAttacking ? 'Attack running…' : `${attackPrompts.length} prompt${attackPrompts.length !== 1 ? 's' : ''} generated`}
+                </div>
               </div>
             </div>
-            <div className="at-card-bd" style={{ display:'flex', flexDirection:'column', gap:14 }}>
-              <div className="at-form-grp">
-                <label className="at-lbl">Initial Attack Prompt</label>
-                <textarea className="at-ta" rows={4} placeholder="Enter your initial attack prompt..." value={config.initialAttackPrompt} onChange={e => update('initialAttackPrompt', e.target.value)} />
-              </div>
-              <div className="at-form-grp">
-                <label className="at-lbl">Attack Scenario</label>
-                <textarea className="at-ta" rows={3} placeholder="Describe the attack scenario and context..." value={config.attackScenario} onChange={e => update('attackScenario', e.target.value)} />
-              </div>
-              <div className="at-form-grp">
-                <label className="at-lbl">Target Information</label>
-                <textarea className="at-ta" rows={3} placeholder="What are you trying to extract or exploit?" value={config.targetInformation} onChange={e => update('targetInformation', e.target.value)} />
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* TABLE full width */}
-        <div className="at-card at-full">
-          <div className="at-card-hd">
-            <div>
-              <div className="at-card-title">Generated Attack Prompts</div>
-              <div className="at-card-sub">
-                {isAttacking ? 'Attack running…'
-                  : `${filtered.length} prompt${filtered.length !== 1 ? 's' : ''} ${filter === 'all' ? 'generated' : `(${filter})`}`}
+            {isAttacking && attackPrompts.length === 0 ? (
+              <div className="at-tbl-empty">
+                <svg className="at-spinner" width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ margin: '0 auto 10px', display: 'block' }}>
+                  <circle cx="10" cy="10" r="8" stroke="#E8E6E0" strokeWidth="2"/>
+                  <path d="M10 2a8 8 0 0 1 8 8" stroke="#1A1A1A" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+                Generating prompts…
               </div>
-            </div>
-            <div className="at-tbl-filters">
-              {(['all','success','partial','blocked'] as const).map(f => (
-                <button key={f} className={`at-f-btn ${filter === f ? 'on' : ''}`} onClick={() => setFilter(f)}>
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {isAttacking && attackPrompts.length === 0 ? (
-            <div className="at-tbl-empty">
-              <svg className="at-spinner" width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ margin:'0 auto 10px', display:'block' }}>
-                <circle cx="10" cy="10" r="8" stroke="#E8E6E0" strokeWidth="2"/>
-                <path d="M10 2a8 8 0 0 1 8 8" stroke="#1A1A1A" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
-              Generating prompts…
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="at-tbl-empty">
-              No prompts yet — configure your attack and press Start Attack.
-            </div>
-          ) : (
-            <>
-              <table className="at-table">
-                <thead>
-                  <tr>
-                    <th style={{ width:36 }}></th>
-                    <th>Status</th><th>Prompt</th><th>Attack Type</th>
-                    <th>Category</th><th>Score</th><th>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((p, idx) => {
-                    const sc = STATUS_CONFIG[p.status];
-                    const isExp = expandedId === p.id;
-                    const scoreColor = p.score >= 0.7 ? '#EF4444' : p.score >= 0.4 ? '#F59E0B' : '#22C55E';
+            ) : attackPrompts.length === 0 ? (
+              <div className="at-tbl-empty">
+                No prompts yet — configure your attack and press Start Attack.
+              </div>
+            ) : (
+              <>
+                <table className="at-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 36 }}></th>
+                      <th>Status</th>
+                      <th>Content</th>
+                      <th>Prompt ID</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attackPrompts.map((p: AttackPrompt, idx: number) => {
+                      const sc = STATUS_CONFIG[p.status] || {
+                        label: p.status,
+                        bg: '#EFF6FF', // Default background
+                        color: '#1D4ED8', // Default color
+                        dot: '#3B82F6',   // Default dot color
+                      };
+                      const isExp = expandedId === p.promptId;
+                      return (
+                        <tr key={p.promptId} className={`data ${isExp ? 'expanded' : ''}`} onClick={() => setExpandedId(isExp ? null : p.promptId)}>
+                          <td className="at-idx">{String(idx + 1).padStart(2, '0')}</td>
+                          <td>
+                            <span className="at-st-badge" style={{ background: sc.bg, color: sc.color }}>
+                              <span className="at-st-dot" style={{ background: sc.dot }} />{sc.label}
+                            </span>
+                          </td>
+                          <td><div className="at-prompt-txt">{p.content}</div></td>
+                          <td><span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#999' }}>{p.promptId}</span></td>
+                          <td><span className="at-ts">{new Date(p.timestamp).toLocaleTimeString()}</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="at-tbl-summary">
+                  {(['generated', 'sent', 'breached', 'blocked', 'failed'] as AttackStatus[]).map(s => {
+                    const sc = STATUS_CONFIG[s];
+                    const count = attackPrompts.filter(p => p.status === s).length;
+                    if (count === 0) return null;
                     return (
-                      <tr key={p.id} className={`data ${isExp ? 'expanded' : ''}`} onClick={() => setExpandedId(isExp ? null : p.id)}>
-                        <td className="at-idx">{String(idx + 1).padStart(2, '0')}</td>
-                        <td>
-                          <span className="at-st-badge" style={{ background:sc.bg, color:sc.color }}>
-                            <span className="at-st-dot" style={{ background:sc.dot }} />{sc.label}
-                          </span>
-                        </td>
-                        <td><div className="at-prompt-txt">{p.prompt}</div></td>
-                        <td><span className="at-type-tag">{p.attackType}</span></td>
-                        <td><span className="at-cat">{p.category}</span></td>
-                        <td>
-                          <div className="at-score-bar">
-                            <div className="at-score-track">
-                              <div className="at-score-fill" style={{ width:`${p.score*100}%`, background:scoreColor }} />
-                            </div>
-                            <span className="at-score-num">{p.score.toFixed(2)}</span>
-                          </div>
-                        </td>
-                        <td><span className="at-ts">{p.timestamp}</span></td>
-                      </tr>
+                      <div key={s} className="at-sum-item">
+                        <span className="at-sum-dot" style={{ background: sc.dot }} />
+                        <span className="at-sum-count">{count}</span>
+                        <span>{sc.label}</span>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-              <div className="at-tbl-summary">
-                {(['success','partial','blocked'] as AttackStatus[]).map(s => {
-                  const sc = STATUS_CONFIG[s];
-                  const count = attackPrompts.filter(p => p.status === s).length;
-                  return (
-                    <div key={s} className="at-sum-item">
-                      <span className="at-sum-dot" style={{ background:sc.dot }} />
-                      <span className="at-sum-count">{count}</span>
-                      <span>{sc.label}</span>
-                    </div>
-                  );
-                })}
-                <span className="at-avg">avg score: {avgScore}</span>
-              </div>
-            </>
-          )}
+                  <div className="at-stats-row">
+                    <span>Total: <span className="at-stats-val">{attackPrompts.length}</span></span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

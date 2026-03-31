@@ -9,7 +9,7 @@ export const exportRun = (session: Run): void => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `run-${session.id}-${session.name.replace(/\s+/g, '_')}.json`;
+  a.download = `run-${session.runid}-${session.name.replace(/\s+/g, '_')}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

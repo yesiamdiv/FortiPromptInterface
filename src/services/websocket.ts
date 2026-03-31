@@ -1,16 +1,17 @@
 import { io, Socket } from 'socket.io-client';
 import { useAppStore } from '../store/appStore';
 import {
-  AttackPrompt,
-  DefenseLog,
-  DefenseStats,
+  WSJoinRunChannel,
+  WSLeaveRunChannel,
+  WSAttackGenerated,
+  WSAttackStatsUpdated,
+  WSAttackCompleted,
+  WSAttackError,
+  WSDefenseResponseGenerated,
+  WSDefenseStatsUpdated,
+  WSDefenseCompleted,
+  WSDefenseError,
 } from '../types';
-
-// Optional: define missing type if not already موجود
-type AttackStats = {
-  total: number;
-  completed: number;
-};
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -49,12 +50,16 @@ class WebSocketService {
       console.error('[WebSocket] Not connected');
       return;
     }
-    this.socket.emit('join_run_channel', { runId });
+    const payload: WSJoinRunChannel = { runId };
+    this.socket.emit('join_run_channel', payload);
+    console.log('[WebSocket] Joined run channel:', runId);
   }
 
   leaveRun(runId: string): void {
     if (!this.socket) return;
-    this.socket.emit('leave_run_channel', { runId });
+    const payload: WSLeaveRunChannel = { runId };
+    this.socket.emit('leave_run_channel', payload);
+    console.log('[WebSocket] Left run channel:', runId);
   }
 
   // ─── Events ───────────────────────────────────────────────────────────────
@@ -76,45 +81,38 @@ class WebSocketService {
       console.error('[WebSocket] Error:', error);
     });
 
-    // ── Attack ──────────────────────────────────────────────────────────────
-    this.socket.on('attack_generated', (data: {
-      runId: string;
-      prompt: AttackPrompt;
-    }) => {
+    // ── Attack Events ───────────────────────────────────────────────────────
+
+    // Server → Client: attack_generated
+    this.socket.on('attack_generated', (data: WSAttackGenerated) => {
       const { addAttackPrompt, activeRunId } = useAppStore.getState();
+      
+      console.log('[WebSocket] attack_generated:', data);
+      
       if (activeRunId === data.runId) {
         addAttackPrompt(data.prompt);
       }
     });
 
-    this.socket.on('attack_prompt_updated', (data: {
-      runId: string;
-      promptId: string;
-      updates: Partial<AttackPrompt>;
-    }) => {
-      const { attackPrompts, setAttackPrompts, activeRunId } = useAppStore.getState();
-
+    // Server → Client: attack_stats_updated
+    this.socket.on('attack_stats_updated', (data: WSAttackStatsUpdated) => {
+      const { setAttackStats, activeRunId } = useAppStore.getState();
+      
+      console.log('[WebSocket] attack_stats_updated:', data);
+      
       if (activeRunId === data.runId) {
-        const updated = attackPrompts.map(p =>
-          p.id === data.promptId ? { ...p, ...data.updates } : p
-        );
-        setAttackPrompts(updated);
+        setAttackStats(data.stats);
       }
     });
 
-    this.socket.on('attack_stats_updated', (data: {
-      runId: string;
-      stats: AttackStats;
-    }) => {
-      console.log('[WebSocket] attack stats:', data);
-    });
+    // Server → Client: attack_completed
+    this.socket.on('attack_completed', (data: WSAttackCompleted) => {
+      const { setIsAttacking, setAttackStats, updateRun, activeRunId } = useAppStore.getState();
 
-    this.socket.on('attack_completed', (data: {
-      runId: string;
-    }) => {
-      const { setIsAttacking, updateRun, activeRunId } = useAppStore.getState();
+      console.log('[WebSocket] attack_completed:', data);
 
       if (activeRunId === data.runId) {
+        setAttackStats(data.finalStats);
         setIsAttacking(false);
         updateRun(data.runId, {
           status: 'completed',
@@ -123,12 +121,11 @@ class WebSocketService {
       }
     });
 
-    this.socket.on('attack_error', (data: {
-      runId: string;
-      error: string;
-      timestamp: string;
-    }) => {
+    // Server → Client: attack_error
+    this.socket.on('attack_error', (data: WSAttackError) => {
       const { setAttackError, setIsAttacking, updateRun, activeRunId } = useAppStore.getState();
+
+      console.error('[WebSocket] attack_error:', data);
 
       if (activeRunId === data.runId) {
         setAttackError(data.error);
@@ -140,42 +137,35 @@ class WebSocketService {
       }
     });
 
-    // ── Defense ─────────────────────────────────────────────────────────────
-    this.socket.on('defense_log', (data: {
-      runId: string;
-      log: DefenseLog;
-    }) => {
-      const { addDefenseLog, activeRunId } = useAppStore.getState();
+    // ── Defense Events ──────────────────────────────────────────────────────
+
+    // Server → Client: defense_response_generated
+    this.socket.on('defense_response_generated', (data: WSDefenseResponseGenerated) => {
+      const { addDefenseResponse, activeRunId } = useAppStore.getState();
+
+      console.log('[WebSocket] defense_response_generated:', data);
 
       if (activeRunId === data.runId) {
-        addDefenseLog(data.log);
+        addDefenseResponse(data.response);
       }
     });
 
-    this.socket.on('defense_progress', (data: {
-      runId: string;
-      testedVectors: number;
-      totalVectors: number;
-    }) => {
-      console.log('[WebSocket] defense progress:', data);
-    });
-
-    this.socket.on('defense_stats_updated', (data: {
-      runId: string;
-      stats: DefenseStats;
-    }) => {
+    // Server → Client: defense_stats_updated
+    this.socket.on('defense_stats_updated', (data: WSDefenseStatsUpdated) => {
       const { setDefenseStats, activeRunId } = useAppStore.getState();
+
+      console.log('[WebSocket] defense_stats_updated:', data);
 
       if (activeRunId === data.runId) {
         setDefenseStats(data.stats);
       }
     });
 
-    this.socket.on('defense_completed', (data: {
-      runId: string;
-      finalStats: DefenseStats;
-    }) => {
+    // Server → Client: defense_completed
+    this.socket.on('defense_completed', (data: WSDefenseCompleted) => {
       const { setDefenseStats, setIsEvaluating, updateRun, activeRunId } = useAppStore.getState();
+
+      console.log('[WebSocket] defense_completed:', data);
 
       if (activeRunId === data.runId) {
         setDefenseStats(data.finalStats);
@@ -187,12 +177,11 @@ class WebSocketService {
       }
     });
 
-    this.socket.on('defense_error', (data: {
-      runId: string;
-      error: string;
-      timestamp: string;
-    }) => {
+    // Server → Client: defense_error
+    this.socket.on('defense_error', (data: WSDefenseError) => {
       const { setDefenseError, setIsEvaluating, updateRun, activeRunId } = useAppStore.getState();
+
+      console.error('[WebSocket] defense_error:', data);
 
       if (activeRunId === data.runId) {
         setDefenseError(data.error);
@@ -202,19 +191,6 @@ class WebSocketService {
           updatedAt: data.timestamp,
         });
       }
-    });
-
-    // ── Run Status ──────────────────────────────────────────────────────────
-    this.socket.on('run_status_changed', (data: {
-      runId: string;
-      status: 'idle' | 'running' | 'completed' | 'failed';
-      updatedAt: string;
-    }) => {
-      const { updateRun } = useAppStore.getState();
-      updateRun(data.runId, {
-        status: data.status,
-        updatedAt: data.updatedAt,
-      });
     });
   }
 

@@ -4,20 +4,18 @@ import {
   Run,
   AttackConfig,
   AttackPrompt,
-  BackendConfig,
-  DefenseLog,
+  AttackStats,
+  DefenseConfig,
+  DefenseResponse,
   DefenseStats,
-  DefenseBackendConfig,
-  DataStorageConfig,
   ComponentType,
   ComponentLabel,
 } from '../types';
 
-// ─── Component label map ─────────────────────────────────────────────────────
-// Used by SessionCard, TemplateCard, SessionManagerPage
+// ─── Component label map ──────────────────────────────────────────────────────
 export const componentLabels: Record<ComponentType, ComponentLabel> = {
-  'attack-testing': { name: 'Attack Testing', icon: Zap,    color: '#EF4444' },
-  'defense-testing': { name: 'Defense Testing', icon: Shield, color: '#22C55E' },
+  'attack':  { name: 'Attack Testing',  icon: Zap,    color: '#EF4444' },
+  'defense': { name: 'Defense Testing', icon: Shield, color: '#22C55E' },
 };
 
 // ─── Store shape ──────────────────────────────────────────────────────────────
@@ -30,22 +28,19 @@ interface AppState {
   // Attack
   attackConfig: AttackConfig | null;
   attackPrompts: AttackPrompt[];
+  attackStats: AttackStats | null;
   isAttacking: boolean;
   attackError: string | null;
 
   // Defense
-  defenseConfig: DefenseBackendConfig | null;
-  defenseLogs: DefenseLog[];
+  defenseConfig: DefenseConfig | null;
+  defenseResponses: DefenseResponse[];
   defenseStats: DefenseStats | null;
   isEvaluating: boolean;
   defenseError: string | null;
 
-  // Backend / connection
-  backendConfig: BackendConfig | null;
+  // Connection status (used by AttackTestingPage)
   connectionStatus: 'idle' | 'testing' | 'connected' | 'failed';
-
-  // Storage
-  storageConfig: DataStorageConfig | null;
 
   // Actions — runs
   setRuns: (runs: Run[]) => void;
@@ -59,23 +54,21 @@ interface AppState {
   setAttackPrompts: (prompts: AttackPrompt[]) => void;
   addAttackPrompt: (prompt: AttackPrompt) => void;
   clearAttackPrompts: () => void;
+  setAttackStats: (stats: AttackStats) => void;
   setIsAttacking: (v: boolean) => void;
   setAttackError: (msg: string | null) => void;
 
   // Actions — defense
-  setDefenseConfig: (config: DefenseBackendConfig) => void;
-  setDefenseLogs: (logs: DefenseLog[]) => void;
-  addDefenseLog: (log: DefenseLog) => void;
+  setDefenseConfig: (config: DefenseConfig) => void;
+  setDefenseResponses: (responses: DefenseResponse[]) => void;
+  addDefenseResponse: (response: DefenseResponse) => void;
+  clearDefenseResponses: () => void;
   setDefenseStats: (stats: DefenseStats) => void;
   setIsEvaluating: (v: boolean) => void;
   setDefenseError: (msg: string | null) => void;
 
-  // Actions — backend
-  setBackendConfig: (config: BackendConfig) => void;
+  // Actions — connection
   setConnectionStatus: (s: 'idle' | 'testing' | 'connected' | 'failed') => void;
-
-  // Actions — storage
-  setStorageConfig: (config: DataStorageConfig) => void;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -86,49 +79,54 @@ export const useAppStore = create<AppState>((set) => ({
 
   attackConfig: null,
   attackPrompts: [],
+  attackStats: null,
   isAttacking: false,
   attackError: null,
 
   defenseConfig: null,
-  defenseLogs: [],
+  defenseResponses: [],
   defenseStats: null,
   isEvaluating: false,
   defenseError: null,
 
-  backendConfig: null,
   connectionStatus: 'idle',
 
-  storageConfig: null,
-
-  // Runs
+  // Runs — use run.runid as the identifier (matching backend schema)
   setRuns: (runs) => set({ runs }),
-  addRun: (run) => set((s) => ({ runs: [...s.runs, run] })),
+  addRun:  (run)  => set((s) => ({ runs: [...s.runs, run] })),
   updateRun: (id, patch) =>
-    set((s) => ({ runs: s.runs.map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
-  deleteRun: (id) => set((s) => ({ runs: s.runs.filter((r) => r.id !== id) })),
+    set((s) => ({
+      runs: s.runs.map((r) => (r.runid === id ? { ...r, ...patch } : r)),
+    })),
+  deleteRun: (id) =>
+    set((s) => ({ runs: s.runs.filter((r) => r.runid !== id) })),
   setActiveRun: (activeRunId) => set({ activeRunId }),
 
   // Attack
-  setAttackConfig: (attackConfig) => set({ attackConfig }),
-  setAttackPrompts: (attackPrompts) => set({ attackPrompts }),
-  addAttackPrompt: (prompt) =>
-    set((s) => ({ attackPrompts: [...s.attackPrompts, prompt] })),
-  clearAttackPrompts: () => set({ attackPrompts: [] }),
-  setIsAttacking: (isAttacking) => set({ isAttacking }),
-  setAttackError: (attackError) => set({ attackError }),
+  setAttackConfig:   (attackConfig)   => set({ attackConfig }),
+  setAttackPrompts:  (attackPrompts)  => set({ attackPrompts: attackPrompts }),
+  addAttackPrompt:   (prompt)         => set((s) => {
+    const exists = s.attackPrompts.some(x => x.promptId === prompt.promptId);
+    if (exists) return s;
+
+    return {
+      attackPrompts: [...s.attackPrompts, prompt],
+    };
+  }),
+  clearAttackPrompts: ()              => set({ attackPrompts: [] }),
+  setAttackStats:    (attackStats)    => set({ attackStats }),
+  setIsAttacking:    (isAttacking)    => set({ isAttacking }),
+  setAttackError:    (attackError)    => set({ attackError }),
 
   // Defense
-  setDefenseConfig: (defenseConfig) => set({ defenseConfig }),
-  setDefenseLogs: (defenseLogs) => set({ defenseLogs }),
-  addDefenseLog: (log) => set((s) => ({ defenseLogs: [...s.defenseLogs, log] })),
-  setDefenseStats: (defenseStats) => set({ defenseStats }),
-  setIsEvaluating: (isEvaluating) => set({ isEvaluating }),
-  setDefenseError: (defenseError) => set({ defenseError }),
+  setDefenseConfig:    (defenseConfig)    => set({ defenseConfig }),
+  setDefenseResponses: (defenseResponses) => set({ defenseResponses }),
+  addDefenseResponse:  (response)         => set((s) => ({ defenseResponses: [...s.defenseResponses, response] })),
+  clearDefenseResponses: ()               => set({ defenseResponses: [] }),
+  setDefenseStats:     (defenseStats)     => set({ defenseStats }),
+  setIsEvaluating:     (isEvaluating)     => set({ isEvaluating }),
+  setDefenseError:     (defenseError)     => set({ defenseError }),
 
-  // Backend
-  setBackendConfig: (backendConfig) => set({ backendConfig }),
+  // Connection
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
-
-  // Storage
-  setStorageConfig: (storageConfig) => set({ storageConfig }),
 }));

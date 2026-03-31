@@ -3,107 +3,85 @@ import { LucideProps } from 'lucide-react';
 
 // ─── Attack ───────────────────────────────────────────────────────────────────
 
-export type AttackStatus = 'success' | 'partial' | 'blocked' | 'running';
+// Updated to match backend: "generated", "sent", "failed", "breached", "blocked"
+export type AttackStatus = 'generated' | 'sent' | 'failed' | 'breached' | 'blocked';
 
-export type AttackType =
-  | 'Direct Injection'
-  | 'Indirect Injection'
-  | 'Prompt Leaking'
-  | 'Jailbreak'
-  | 'Chain Attack'
-  | 'Role Play Exploit';
+export type AttackStrategy = 
+  | 'default'
+  | 'jailbreak'
+  | 'prompt_injection'
+  | 'indirect_injection'
+  | 'prompt_leaking'
+  | 'chain_attack'
+  | 'role_play_exploit';
+
+export type AttackDomain = 'copyright' | 'cybersecurity' |'harassment' | 'harmful' | 'illegal' | 'misinformation';
 
 export interface AttackConfig {
-  backendType: BackendType;
-  connectionUrl: string;
-  apiKey: string;
-  modelSelection: ModelSelection;
-  attackType: AttackType;
-  targetUrl: string;
-  attackRate: number;
-  maxIterations: number;
-  successThreshold: number;
-  initialAttackPrompt: string;
-  attackScenario: string;
-  targetInformation: string;
+  model: string;
+  attackStrategy: AttackStrategy;
+  domain: AttackDomain;
+  modelUrl: string;
+  iterations: number;
+  parameters?: {
+    temperature?: number;
+    engine?: string;
+    [key: string]: any;
+  };
 }
 
 export interface AttackPrompt {
-  id: string;
-  prompt: string;
-  attackType: AttackType;
+  promptId: string;
+  content: string;
   status: AttackStatus;
-  category: string;
-  score: number;
   timestamp: string;
 }
 
-/** @deprecated use AttackPrompt */
-export type GeneratedPrompt = AttackPrompt;
-
-// ─── Backend / Model ──────────────────────────────────────────────────────────
-
-export type BackendType = 'Google Colab' | 'OpenAI' | 'Anthropic' | 'Custom API';
-
-export type ModelSelection =
-  | 'GPT-4o-mini'
-  | 'GPT-4o'
-  | 'claude-3-5-sonnet'
-  | 'claude-3-haiku'
-  | 'gemini-1.5-flash';
-
-export interface BackendConfig {
-  backendType: BackendType;
-  connectionUrl: string;
-  apiKey?: string;
-  modelSelection: ModelSelection;
+export interface AttackStats {
+  totalPrompts: number;
+  pendingAttacks: number;
+  attacksGenerated: number;
 }
 
 // ─── Defense ─────────────────────────────────────────────────────────────────
 
-export interface DefenseLayer {
-  id: string;
+export type DefenseEvaluation = 'blocked' | 'passed' | 'failed_filter';
+
+export interface DefenseFilter {
   name: string;
   enabled: boolean;
-  strictness: number;
 }
 
-export interface DefenseLog {
-  id: string;
+export interface DefenseConfig {
+  filters: DefenseFilter[];
+  model: string;
+}
+
+export interface DefenseResponse {
+  promptId: string;
+  defenseResponse: string;
+  evaluation: DefenseEvaluation;
+  blockedAt?: string;
   timestamp: string;
-  attackType: AttackType;
-  blocked: boolean;
-  score: number;
-  details: string;
+}
+
+export interface FilterPerformance {
+  blocked: number;
+  falsePositives: number;
 }
 
 export interface DefenseStats {
-  overallScore: number;
-  directInjection: number;
-  jailbreakResistance: number;
-  promptLeaking: number;
-  rolePlayExploits: number;
-  indirectInjection: number;
-}
-
-export interface DefenseBackendConfig {
-  systemPrompt: string;
-  guardrailLevel: number;
-  attackVectors: string;
-  layers: DefenseLayer[];
-}
-
-// ─── Storage ──────────────────────────────────────────────────────────────────
-
-export interface DataStorageConfig {
-  persistLogs: boolean;
-  exportFormat: 'json' | 'csv';
-  retentionDays: number;
+  totalResponses: number;
+  blockedCount: number;
+  passedCount: number;
+  overallDefenseScore: number;
+  filterPerformance?: Record<string, FilterPerformance>;
 }
 
 // ─── Session / Run ────────────────────────────────────────────────────────────
 
-export type ComponentType = 'attack-testing' | 'defense-testing';
+export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'paused';
+export type ComponentType = 'attack' | 'defense';
 
 export interface ComponentLabel {
   name: string;
@@ -112,37 +90,93 @@ export interface ComponentLabel {
 }
 
 export interface Run {
-  id: string;
+  runid: string;
   name: string;
   description?: string;
-  status: 'idle' | 'running' | 'completed' | 'failed';
+  status: RunStatus;
   components: ComponentType[];
   createdAt: string;
   updatedAt: string;
-  attackConfig?: AttackConfig;
-  defenseConfig?: DefenseBackendConfig;
-  prompts?: AttackPrompt[];
-  defenseLogs?: DefenseLog[];
 }
 
-export interface RunTemplate {
-  id: string;
+export interface CreateRunRequest {
   name: string;
-  description: string;
+  description?: string;
   components: ComponentType[];
-  attackConfig?: Partial<AttackConfig>;
-  defenseConfig?: Partial<DefenseBackendConfig>;
 }
 
-// ─── Evaluation ───────────────────────────────────────────────────────────────
+export interface UpdateRunRequest {
+  name?: string;
+  description?: string;
+  status?: RunStatus;
+}
 
-export interface EvaluationResult {
+// ─── WebSocket Events ─────────────────────────────────────────────────────────
+
+export interface WSJoinRunChannel {
   runId: string;
+}
+
+export interface WSLeaveRunChannel {
+  runId: string;
+}
+
+export interface WSAttackGenerated {
+  runId: string;
+  prompt: AttackPrompt;
+}
+
+export interface WSAttackStatsUpdated {
+  runId: string;
+  stats: AttackStats;
+}
+
+export interface WSAttackCompleted {
+  runId: string;
+  finalStats: AttackStats;
+}
+
+export interface WSAttackError {
+  runId: string;
+  error: string;
   timestamp: string;
-  totalPrompts: number;
-  successCount: number;
-  partialCount: number;
-  blockedCount: number;
-  averageScore: number;
-  defenseStats?: DefenseStats;
+}
+
+export interface WSDefenseResponseGenerated {
+  runId: string;
+  response: DefenseResponse;
+}
+
+export interface WSDefenseStatsUpdated {
+  runId: string;
+  stats: DefenseStats;
+}
+
+export interface WSDefenseCompleted {
+  runId: string;
+  finalStats: DefenseStats;
+}
+
+export interface WSDefenseError {
+  runId: string;
+  error: string;
+  timestamp: string;
+}
+
+// ─── API Responses ────────────────────────────────────────────────────────────
+
+export interface StartAttackRequest {
+  resumeFromLastSaved?: boolean;
+}
+
+export interface StartAttackResponse {
+  message: string;
+  runId: string;
+  status: RunStatus;
+}
+
+export interface StopAttackResponse {
+  message: string;
+  runId: string;
+  status: RunStatus;
 }

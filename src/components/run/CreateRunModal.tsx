@@ -9,8 +9,8 @@ interface CreateRunModalProps {
 }
 
 const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, componentLabels }) => {
-  const [runName, setRunName] = useState('');
-  const [description, setDescription] = useState('');
+  const [runName, setRunName]                       = useState('');
+  const [description, setDescription]               = useState('');
   const [selectedComponents, setSelectedComponents] = useState<ComponentType[]>([]);
 
   const handleComponentChange = (componentKey: ComponentType, isChecked: boolean) => {
@@ -20,18 +20,20 @@ const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, c
   };
 
   const handleSubmit = () => {
-    if (runName && selectedComponents.length > 0) {
-      onCreateRun(runName, description, selectedComponents);
+    if (runName.trim() && selectedComponents.length > 0) {
+      onCreateRun(runName.trim(), description.trim(), selectedComponents);
       onClose();
-    } else {
-      alert('Please fill in the run name and select at least one component.');
     }
   };
+
+  const isValid = runName.trim().length > 0 && selectedComponents.length > 0;
 
   return (
     <>
       <style>{`
-        .modal-overlay {
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap');
+
+        .crm-overlay {
           position: fixed;
           inset: 0;
           background: rgba(0, 0, 0, 0.4);
@@ -39,175 +41,184 @@ const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, c
           align-items: center;
           justify-content: center;
           z-index: 1000;
-          animation: fadeIn 0.15s ease-out;
+          animation: crm-fadeIn 0.15s ease-out;
         }
 
-        @keyframes fadeIn {
+        @keyframes crm-fadeIn {
           from { opacity: 0; }
-          to { opacity: 1; }
+          to   { opacity: 1; }
         }
 
-        .modal-content {
+        .crm-modal {
           background: #fff;
           border-radius: 12px;
-          max-width: 560px;
-          width: 100%;
-          margin: 24px;
-          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-          animation: slideUp 0.2s ease-out;
+          max-width: 520px;
+          width: calc(100% - 32px);
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.15);
+          font-family: 'DM Sans', sans-serif;
+          animation: crm-slideUp 0.2s ease-out;
+          overflow: hidden;
         }
 
-        @keyframes slideUp {
-          from { 
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to { 
-            opacity: 1;
-            transform: translateY(0);
-          }
+        @keyframes crm-slideUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0);    }
         }
 
-        .modal-header {
+        .crm-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 24px 24px 20px;
-          border-bottom: 1px solid #F0EDE6;
+          padding: 20px 24px;
+          border-bottom: 1px solid #E8E6E0;
         }
 
-        .modal-title {
-          font-size: 20px;
+        .crm-title {
+          font-size: 18px;
           font-weight: 600;
-          letter-spacing: -0.5px;
+          letter-spacing: -0.4px;
+          color: #1A1A1A;
         }
 
-        .modal-close {
-          padding: 6px;
+        .crm-close {
+          padding: 5px;
           background: transparent;
           border: none;
           cursor: pointer;
           border-radius: 6px;
           color: #888;
           transition: all 0.15s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
-        .modal-close:hover {
+        .crm-close:hover {
           background: #F0EDE6;
           color: #1A1A1A;
         }
 
-        .modal-body {
+        .crm-body {
           padding: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 18px;
         }
 
-        .form-group {
-          margin-bottom: 20px;
+        .crm-field {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
         }
 
-        .form-group:last-child {
-          margin-bottom: 0;
-        }
-
-        .form-label {
-          display: block;
-          font-size: 12px;
+        .crm-label {
+          font-size: 11px;
           font-weight: 500;
-          color: #888;
-          letter-spacing: 0.3px;
+          color: #999;
+          letter-spacing: 0.4px;
           text-transform: uppercase;
-          margin-bottom: 8px;
         }
 
-        .form-input {
-          width: 100%;
-          height: 40px;
+        .crm-input {
+          height: 38px;
           background: #F7F6F3;
           border: 1px solid #E8E6E0;
           border-radius: 8px;
           padding: 0 12px;
-          font-size: 14px;
+          font-size: 13px;
           font-family: 'DM Sans', sans-serif;
           color: #1A1A1A;
           outline: none;
-          transition: border-color 0.15s;
-        }
-
-        .form-input:focus {
-          border-color: #1A1A1A;
-        }
-
-        .form-textarea {
+          transition: border-color 0.15s, background 0.15s;
           width: 100%;
+          box-sizing: border-box;
+        }
+
+        .crm-input:focus {
+          border-color: #1A1A1A;
+          background: #fff;
+        }
+
+        .crm-textarea {
           background: #F7F6F3;
           border: 1px solid #E8E6E0;
           border-radius: 8px;
-          padding: 12px;
-          font-size: 14px;
+          padding: 10px 12px;
+          font-size: 13px;
           font-family: 'DM Sans', sans-serif;
           color: #1A1A1A;
           outline: none;
-          transition: border-color 0.15s;
           resize: vertical;
-          min-height: 72px;
+          min-height: 68px;
+          transition: border-color 0.15s, background 0.15s;
+          width: 100%;
+          box-sizing: border-box;
+          line-height: 1.55;
         }
 
-        .form-textarea:focus {
+        .crm-textarea:focus {
           border-color: #1A1A1A;
+          background: #fff;
         }
 
-        .components-grid {
+        .crm-components {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 10px;
         }
 
-        .component-option {
+        .crm-comp-label {
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 12px;
+          padding: 12px 14px;
           background: #F7F6F3;
-          border: 1px solid #E8E6E0;
+          border: 1.5px solid #E8E6E0;
           border-radius: 8px;
           cursor: pointer;
           transition: all 0.15s;
+          user-select: none;
         }
 
-        .component-option:hover {
+        .crm-comp-label:hover {
           border-color: #D4D2CC;
+          background: #F0EDE6;
         }
 
-        .component-option.selected {
-          border-color: #1A1A1A;
-          background: #fff;
+        .crm-comp-label.selected-attack {
+          border-color: #FCA5A5;
+          background: #FEF2F2;
         }
 
-        .component-checkbox {
-          width: 16px;
-          height: 16px;
+        .crm-comp-label.selected-defense {
+          border-color: #86EFAC;
+          background: #F0FDF4;
+        }
+
+        .crm-comp-checkbox {
+          width: 15px;
+          height: 15px;
           cursor: pointer;
-        }
-
-        .component-icon {
           flex-shrink: 0;
+          accent-color: #1A1A1A;
         }
 
-        .component-name {
+        .crm-comp-name {
           font-size: 13px;
           font-weight: 500;
+          color: #1A1A1A;
         }
 
-        .modal-footer {
+        .crm-footer {
           display: flex;
           justify-content: flex-end;
-          gap: 10px;
-          padding: 20px 24px 24px;
-          border-top: 1px solid #F0EDE6;
+          gap: 8px;
+          padding: 16px 24px 20px;
+          border-top: 1px solid #E8E6E0;
         }
 
-        .modal-btn {
-          padding: 10px 20px;
+        .crm-btn {
+          padding: 9px 18px;
           font-size: 13px;
           font-weight: 500;
           border-radius: 8px;
@@ -217,83 +228,84 @@ const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, c
           font-family: 'DM Sans', sans-serif;
         }
 
-        .modal-btn-cancel {
+        .crm-btn-cancel {
           background: #F0EDE6;
           color: #555;
         }
 
-        .modal-btn-cancel:hover {
+        .crm-btn-cancel:hover {
           background: #E8E6E0;
         }
 
-        .modal-btn-create {
+        .crm-btn-create {
           background: #1A1A1A;
           color: #fff;
         }
 
-        .modal-btn-create:hover {
+        .crm-btn-create:hover:not(:disabled) {
           background: #333;
         }
 
-        .modal-btn-create:disabled {
-          opacity: 0.5;
+        .crm-btn-create:disabled {
+          opacity: 0.45;
           cursor: not-allowed;
         }
       `}</style>
 
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+      <div className="crm-overlay" onClick={onClose}>
+        <div className="crm-modal" onClick={e => e.stopPropagation()}>
+
           {/* Header */}
-          <div className="modal-header">
-            <h2 className="modal-title">Create New Run</h2>
-            <button className="modal-close" onClick={onClose}>
-              <X size={20} />
+          <div className="crm-header">
+            <span className="crm-title">Create New Run</span>
+            <button className="crm-close" onClick={onClose}>
+              <X size={18} />
             </button>
           </div>
 
           {/* Body */}
-          <div className="modal-body">
-            <div className="form-group">
-              <label className="form-label">Run Name</label>
+          <div className="crm-body">
+            <div className="crm-field">
+              <label className="crm-label">Run Name *</label>
               <input
                 type="text"
-                className="form-input"
-                placeholder="e.g., Production RAG Security Test"
+                className="crm-input"
+                placeholder="e.g. Production RAG Security Test"
                 value={runName}
-                onChange={(e) => setRunName(e.target.value)}
+                onChange={e => setRunName(e.target.value)}
+                autoFocus
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Description (Optional)</label>
+            <div className="crm-field">
+              <label className="crm-label">Description (optional)</label>
               <textarea
-                className="form-textarea"
-                placeholder="Describe the purpose of this testing run..."
+                className="crm-textarea"
+                placeholder="Describe the purpose of this testing run…"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={e => setDescription(e.target.value)}
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Select Components</label>
-              <div className="components-grid">
+            <div className="crm-field">
+              <label className="crm-label">Components *</label>
+              <div className="crm-components">
                 {(Object.entries(componentLabels) as [ComponentType, ComponentLabel][]).map(([key, label]) => {
-                  const Icon = label.icon;
+                  const Icon       = label.icon;
                   const isSelected = selectedComponents.includes(key);
-                  
+                  const selClass   = isSelected
+                    ? key === 'attack' ? 'selected-attack' : 'selected-defense'
+                    : '';
                   return (
-                    <label
-                      key={key}
-                      className={`component-option ${isSelected ? 'selected' : ''}`}
-                    >
+                    <label key={key} className={`crm-comp-label ${selClass}`}>
                       <input
                         type="checkbox"
-                        className="component-checkbox"
+                        className="crm-comp-checkbox"
                         checked={isSelected}
-                        onChange={(e) => handleComponentChange(key, e.target.checked)}
+                        onChange={e => handleComponentChange(key, e.target.checked)}
                       />
-                      <Icon className="component-icon" size={18} style={{ color: label.color }} />
-                      <span className="component-name">{label.name}</span>
+                      <Icon size={16} style={{ color: label.color, flexShrink: 0 }} />
+                      <span className="crm-comp-name">{label.name}</span>
                     </label>
                   );
                 })}
@@ -302,18 +314,17 @@ const CreateRunModal: React.FC<CreateRunModalProps> = ({ onClose, onCreateRun, c
           </div>
 
           {/* Footer */}
-          <div className="modal-footer">
-            <button className="modal-btn modal-btn-cancel" onClick={onClose}>
-              Cancel
-            </button>
+          <div className="crm-footer">
+            <button className="crm-btn crm-btn-cancel" onClick={onClose}>Cancel</button>
             <button
-              className="modal-btn modal-btn-create"
+              className="crm-btn crm-btn-create"
               onClick={handleSubmit}
-              disabled={!runName || selectedComponents.length === 0}
+              disabled={!isValid}
             >
               Create Run
             </button>
           </div>
+
         </div>
       </div>
     </>
