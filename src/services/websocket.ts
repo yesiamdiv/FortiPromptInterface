@@ -13,6 +13,9 @@ import {
   WSDefenseError,
 } from '../types';
 
+import {useManualStore} from '../store/manualStore'
+import { WSManualSessionCreated, WSManualSessionEvaluated, WSManualTurnAdded } from '../types/manual'
+
 class WebSocketService {
   private socket: Socket | null = null;
   private connected = false;
@@ -192,7 +195,49 @@ class WebSocketService {
         });
       }
     });
+    
+    // ── Manual Attack Events ────────────────────────────────────────────────
+  
+    // Server → Client: manual_session_created
+    this.socket.on('manual_session_created', (data: WSManualSessionCreated) => {
+      const { addSession } = useManualStore.getState();
+      const { activeRunId } = useAppStore.getState();
+      console.log('[WebSocket] manual_session_created:', data);
+      if (activeRunId === data.runId) {
+        addSession(data.session);
+      }
+    });
+  
+    // Server → Client: manual_turn_added
+    this.socket.on('manual_turn_added', (data: WSManualTurnAdded) => {
+      const { appendTurnToActiveSession, activeSession } = useManualStore.getState();
+      const { activeRunId } = useAppStore.getState();
+      console.log('[WebSocket] manual_turn_added:', data);
+      if (activeRunId === data.runId && activeSession?.session_id === data.sessionId) {
+        appendTurnToActiveSession(data.turn);
+      }
+    });
+  
+    // Server → Client: manual_session_evaluated
+    this.socket.on('manual_session_evaluated', (data: WSManualSessionEvaluated) => {
+      const { updateSession } = useManualStore.getState();
+      const { activeRunId } = useAppStore.getState();
+      console.log('[WebSocket] manual_session_evaluated:', data);
+      if (activeRunId === data.runId) {
+        updateSession(data.sessionId, {
+          status: 'evaluated',
+          evaluation_score: data.evaluation.score,
+          evaluation_label: data.evaluation.label,
+          evaluation_reasoning: data.evaluation.reasoning,
+          defense_filter_used: data.defense_filter_used,
+          saved_at: new Date().toISOString(),
+          evaluated_at: new Date().toISOString(),
+        });
+      }
+    });
   }
+
+
 
   // ─── Utils ────────────────────────────────────────────────────────────────
   isConnected(): boolean {

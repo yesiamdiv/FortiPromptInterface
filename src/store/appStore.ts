@@ -1,4 +1,4 @@
-import { Zap, Shield } from 'lucide-react';
+import { Zap, Shield, MessageSquare } from 'lucide-react';
 import { create } from 'zustand';
 import {
   Run,
@@ -14,8 +14,9 @@ import {
 
 // ─── Component label map ──────────────────────────────────────────────────────
 export const componentLabels: Record<ComponentType, ComponentLabel> = {
-  'attack':  { name: 'Attack Testing',  icon: Zap,    color: '#EF4444' },
-  'defense': { name: 'Defense Testing', icon: Shield, color: '#22C55E' },
+  'attack':  { name: 'Attack Testing',  icon: Zap,           color: '#EF4444' },
+  'defense': { name: 'Defense Testing', icon: Shield,        color: '#22C55E' },
+  'manual':  { name: 'Manual Attack',   icon: MessageSquare, color: '#6366F1' },
 };
 
 // ─── Store shape ──────────────────────────────────────────────────────────────

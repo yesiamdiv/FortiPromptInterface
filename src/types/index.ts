@@ -81,7 +81,7 @@ export interface DefenseStats {
 // ─── Session / Run ────────────────────────────────────────────────────────────
 
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'paused';
-export type ComponentType = 'attack' | 'defense';
+export type ComponentType = 'attack' | 'defense' | 'manual';
 
 export interface ComponentLabel {
   name: string;

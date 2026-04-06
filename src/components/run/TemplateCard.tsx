@@ -18,8 +18,8 @@ interface TemplateCardProps {
 const COMP_STYLES: Record<ComponentType, { bg: string; color: string; border: string }> = {
   attack:  { bg: '#FEF2F2', color: '#DC2626', border: '#FCA5A5' },
   defense: { bg: '#F0FDF4', color: '#15803D', border: '#86EFAC' },
+  manual:  { bg: '#EEF2FF', color: '#4F46E5', border: '#C7D2FE' },
 };
-
 const TemplateCard: React.FC<TemplateCardProps> = ({ template, componentLabels, onSelectTemplate }) => {
   return (
     <>

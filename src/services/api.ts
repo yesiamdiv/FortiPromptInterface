@@ -77,23 +77,44 @@ export const fetchRuns = async (): Promise<Run[]> => {
 };
 
 /** POST /api/runs - Creates a new test run */
-export const createRun = (request: CreateRunRequest): Promise<Run> =>
-  apiFetch<Run>(`${BASE_URL}/runs`, {
+export const createRun = async (request: CreateRunRequest): Promise<Run> => {
+  const run = await apiFetch<any>(`${BASE_URL}/runs`, {
     method: 'POST',
     headers: makeHeaders(),
     body: JSON.stringify(request),
   });
 
+  // ✅ normalize just like fetchRuns
+  return {
+    runid: run.run_id,
+    name: run.name,
+    description: run.description,
+    status: run.status,
+    components: run.components,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+  };
+};
+
 /** PATCH /api/runs/{runId} - Updates an existing test run */
-export const updateRun = (
+export const updateRun = async(
   runId: string,
   request: UpdateRunRequest
-): Promise<Run> =>
-  apiFetch<Run>(`${BASE_URL}/runs/${runId}`, {
+): Promise<Run> =>{
+  const run = await apiFetch<any>(`${BASE_URL}/runs/${runId}`, {
     method: 'PATCH',
     headers: makeHeaders(),
     body: JSON.stringify(request),
   });
+  return {
+    runid: run.run_id,
+    name: run.name,
+    description: run.description,
+    status: run.status,
+    components: run.components,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+  };}
 
 /** DELETE /api/runs/{runId} - Deletes a test run */
 export const deleteRun = (runId: string): Promise<void> =>
