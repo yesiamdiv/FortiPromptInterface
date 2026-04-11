@@ -5,12 +5,18 @@ export type ChatRole = 'attacker' | 'target' | 'defense';
 export type SessionStatus = 'active' | 'saved' | 'evaluated';
 export type EvaluationLabel = 'breached' | 'blocked' | 'partial';
 
+export interface DefenseResult {
+  malicious: number;
+  confidence: number;
+  category: string;
+}
+
 export interface ChatTurn {
   turn_id: string;
   role: ChatRole;
   content: string;
   timestamp: string;
-  metadata: Record<string, any>;
+  metadata: { defense_result?: DefenseResult } & Record<string, any>;
 }
 
 export interface ChatSession {
@@ -68,6 +74,7 @@ export interface AddTurnResponse {
   turn_id: string;
   session_id: string;
   run_id: string;
+  defense_result?: DefenseResult | null;
 }
 
 export interface SaveSessionRequest {

@@ -17,7 +17,7 @@ import {
   deleteManualSession,
   fetchManualSession,
 } from '../services/api_manual';
-import { ChatSession, ChatTurn, FilterMode, ManualRunConfig } from '../types/manual';
+import { ChatSession, ChatTurn, DefenseResult, FilterMode, ManualRunConfig } from '../types/manual';
 
 interface ManualAttackPageProps {
   onBack: () => void;
@@ -85,6 +85,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ onBack }) => {
   const [startingSession, setStartingSession] = useState(false);
   const [saveLabelInput, setSaveLabelInput] = useState('');
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [defenseResult, setDefenseResult] = useState<DefenseResult | null>(null);
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [loadingSession, setLoadingSession] = useState<boolean>(false);
 
@@ -126,6 +127,11 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ onBack }) => {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeSession]);
+
+  useEffect(() => {
+    setDefenseResult(null);
+  }, [activeSession?.session_id]);
+
   // ── Config save ───────────────────────────────────────────────────────────
   const handleConfigSave = async (newCfg: ManualRunConfig) => {
     if (!activeRunId) return;
@@ -228,10 +234,11 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ onBack }) => {
     appendTurnToActiveSession(optimistic);
 
     try {
-      await addTurn(activeRunId, activeSession.session_id, {
+      const response = await addTurn(activeRunId, activeSession.session_id, {
         role: 'attacker',
         content,
       });
+      setDefenseResult(response.defense_result ?? null);
     } catch (e: any) {
       setManualError(e.message);
     } finally {
@@ -479,6 +486,19 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ onBack }) => {
               </div>
 
               {/* Messages */}
+              {defenseResult && (
+                <div style={styles.defenseBanner}>
+                  <Shield size={14} style={{ marginRight: 8 }} />
+                  <div>
+                    <div style={styles.defenseBannerTitle}>
+                      {defenseResult.malicious === 1 ? 'Blocked by defense filter' : 'Passed defense filter'}
+                    </div>
+                    <div style={styles.defenseBannerMeta}>
+                      Category: {defenseResult.category} · Confidence: {Math.round(defenseResult.confidence * 100)}%
+                    </div>
+                  </div>
+                </div>
+              )}
               <div style={styles.messages}>
                 {displayTurns.length === 0 && (
                   <div style={styles.noMessages}>Start typing your attack prompt below…</div>
@@ -502,6 +522,12 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ onBack }) => {
                         {turn.role === 'attacker' ? '⚔️ You' : turn.role === 'defense' ? '🛡 Defense' : '🎯 Target'}
                       </div>
                       <div style={styles.bubbleContent}>{turn.content}</div>
+                      {turn.role === 'defense' && turn.metadata?.defense_result && (
+                        <div style={styles.defenseMeta}>
+                          <span>Category: {turn.metadata.defense_result.category}</span>
+                          <span>Confidence: {Math.round(turn.metadata.defense_result.confidence * 100)}%</span>
+                        </div>
+                      )}
                       <div style={styles.bubbleTime}>{new Date(turn.timestamp).toLocaleTimeString()}</div>
                     </div>
                   </div>
@@ -812,6 +838,24 @@ const styles: Record<string, React.CSSProperties> = {
   bubbleRole:    { fontSize: 10, fontWeight: 600, opacity: .55, marginBottom: 4 },
   bubbleContent: { fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
   bubbleTime:    { fontSize: 10, opacity: .4, marginTop: 5, textAlign: 'right' },
+  defenseBanner: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    background: '#FEF3F2', border: '1px solid #FECACA',
+    borderRadius: 12, padding: '12px 14px', margin: '0 20px 12px',
+    color: '#991B1B', fontSize: 13,
+  },
+  defenseBannerTitle: {
+    fontWeight: 600,
+    marginBottom: 4,
+  },
+  defenseBannerMeta: {
+    fontSize: 12,
+    color: '#7C2D12',
+  },
+  defenseMeta: {
+    display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8,
+    fontSize: 11, color: '#444', lineHeight: 1.4,
+  },
 
   inputRow: {
     display: 'flex', gap: 8, padding: '12px 20px',

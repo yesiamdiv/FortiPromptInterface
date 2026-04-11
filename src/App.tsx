@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import HomePage from './pages/HomePage';
+import HomePage from './pages/homepage';
 import DashboardPage from './pages/DashboardPage';
 import AttackTestingPage from './pages/AttackTestingPage';
 import DefenseTestingPage from './pages/DefenseTestingPage';
@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const setActiveRun = useAppStore(s => s.setActiveRun);
 
   useEffect(() => {
-    const socketUrl = process.env.REACT_APP_SOCKET_URL || 'http://localhost:3001';
+    const socketUrl = process.env.REACT_APP_SOCKET_URL || 'http://localhost:8000';
     websocketService.connect(socketUrl);
 
     const initializeRuns = async () => {
