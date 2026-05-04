@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { DefenseConfig, DefenseFilter, DefenseStats } from '../types';
+import React, { useState, useEffect } from 'react';
+import { DefenseConfig, DefenseFilter, DefenseStats, GraphConfig, Run } from '../types';
 import { useAppStore } from '../store/appStore';
-import { updateDefenseConfig, fetchDefenseStats } from '../services/api';
+import { updateRun as updateRunApi, fetchRun } from '../services/api';
+import { websocketService } from '../services/websocket';
 
 interface DefenseTestingPageProps {
   onBack: () => void;
@@ -32,36 +33,61 @@ const DEFAULT_CONFIG: DefenseConfig = {
 
 const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ onBack }) => {
   const [activeTab, setActiveTab]     = useState<'attack' | 'defense'>('defense');
-  const [formConfig, setFormConfig]   = useState<DefenseConfig>(DEFAULT_CONFIG);
-  const [apiKey, setApiKey]           = useState('');
+  const [formConfig, setFormConfig] = useState<DefenseConfig>(DEFAULT_CONFIG);
+  const [apiKey, setApiKey]         = useState('');
 
   // Global store — read
-  const activeRunId  = useAppStore(s => s.activeRunId);
-  const defenseStats = useAppStore(s => s.defenseStats);
+  const activeRunId    = useAppStore(s => s.activeRunId);
+  const activeRun      = useAppStore(s => s.runs.find(r => r.runid === s.activeRunId)); // Fetch active run details
+  const defenseStats   = useAppStore(s => s.defenseStats);
   const defenseResponses = useAppStore(s => s.defenseResponses);
-  const isEvaluating = useAppStore(s => s.isEvaluating);
-  const defenseError = useAppStore(s => s.defenseError);
+  const isEvaluating   = useAppStore(s => s.isEvaluating);
+  const defenseError   = useAppStore(s => s.defenseError);
 
   // Global store — write
-  const setDefenseConfig = useAppStore(s => s.setDefenseConfig);
   const setDefenseStats  = useAppStore(s => s.setDefenseStats);
   const setIsEvaluating  = useAppStore(s => s.setIsEvaluating);
   const setDefenseError  = useAppStore(s => s.setDefenseError);
   const updateRun        = useAppStore(s => s.updateRun);
 
+  // ── Load existing config on mount ─────────────────────────────────────────
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    const loadConfig = async () => {
+      try {
+        const run = await fetchRun(activeRunId);
+        if (run?.graph_config?.strategy_params?.defense_config) {
+          setFormConfig(run.graph_config.strategy_params.defense_config);
+        }
+        if (run?.graph_config?.strategy_params?.api_key) {
+          setApiKey(run.graph_config.strategy_params.api_key);
+        }
+      } catch (err: any) {
+        setDefenseError(err.message || 'Failed to load defense config.');
+      }
+    };
+    loadConfig();
+  }, [activeRunId]);
+
   // ── Save config + trigger evaluation ────────────────────────────────────────
   const handleEvaluate = async () => {
-    if (!activeRunId) return;
+    if (!activeRunId || !activeRun) return;
     setDefenseError(null);
-    setDefenseConfig(formConfig);
     setIsEvaluating(true);
     updateRun(activeRunId, { status: 'running', updatedAt: new Date().toISOString() });
 
     try {
-      await updateDefenseConfig(activeRunId, formConfig, apiKey || undefined);
-      // Stats will stream in via WebSocket; also fetch current snapshot
-      const stats = await fetchDefenseStats(activeRunId);
-      setDefenseStats(stats);
+      const newStrategyParams = {
+        ...activeRun.graph_config?.strategy_params,
+        defense_config: formConfig,
+        api_key: apiKey || undefined,
+      };
+
+      // Call the API directly with the flattened strategy_params
+      await updateRunApi(activeRunId, { strategy_params: newStrategyParams });
+      // Defense stats will now stream via WebSocket events.
+      // No direct fetchDefenseStats call needed here.
       updateRun(activeRunId, { status: 'completed', updatedAt: new Date().toISOString() });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Evaluation failed';

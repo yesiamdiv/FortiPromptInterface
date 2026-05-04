@@ -1,240 +1,283 @@
+// services/api.ts
+// ─── FortiPrompt REST API Client ─────────────────────────────────────────────
+//
+// Architecture:
+//   Automatic run: createRun → updateRun (PATCH) → startAutomaticRun (POST) → WS events
+//   Manual run:    createRun → createManualSession → submitManualTurn (repeat)
+//                  Listen to session_id WS room; disable input until run_idle fires.
+//
+// ⚠ Chat history rendering rule:
+//   User bubble  → turn.metadata.user_input   (NOT turn.content / attack.prompt)
+//   Defense/AI   → turn.content (for defense/target roles)
+
 import {
   Run,
   CreateRunRequest,
   UpdateRunRequest,
-  AttackConfig,
-  AttackPrompt,
-  AttackStats,
-  DefenseConfig,
-  DefenseResponse,
-  DefenseStats,
-  StartAttackRequest,
-  StartAttackResponse,
-  StopAttackResponse,
+  GraphConfig,
+  StrategySchema,
+  Provider,
+  NodeSchema,
+  StartAutomaticRunRequest,
+  StartAutomaticRunResponse,
 } from '../types';
 
-// ─── Base config ──────────────────────────────────────────────────────────────
-const BASE_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api';
+import {
+  CreateManualSessionRequest,
+  ManualSessionResponse,
+  ManualTurnHistoryResponse,
+  SubmitManualTurnRequest,
+  SubmitManualTurnResponse,
+} from '../types/manual';
 
-const makeHeaders = (apiKey?: string): HeadersInit => ({
-  'Content-Type': 'application/json',
-  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-});
+// ─── Base URL ─────────────────────────────────────────────────────────────────
 
-// Generic fetch wrapper
+const BASE_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api/v1';
+
+// ─── Generic fetch wrapper ────────────────────────────────────────────────────
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, options);
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`[${res.status}] ${text}`);
   }
-  // Handle 204 No Content
-  if (res.status === 204) {
-    return undefined as T;
-  }
+
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
-// ─── Connection ───────────────────────────────────────────────────────────────
-export const testConnection = async (
-  url: string,
-  apiKey?: string
-): Promise<boolean> => {
+// ─── Normalizer ───────────────────────────────────────────────────────────────
+
+function normalizeRun(raw: any): Run {
+  return {
+    runid:       raw.run_id,
+    name:        raw.name,
+    description: raw.description,
+    status:      raw.status,
+    components:  raw.components ?? [],
+    graph_config: raw.graph_config,
+    createdAt:   raw.created_at,
+    updatedAt:   raw.updated_at,
+  };
+}
+
+// =============================================================================
+// CONNECTION
+// =============================================================================
+
+export const testConnection = async (url: string): Promise<boolean> => {
   try {
-    const res = await fetch(`${url}/health`, {
-      headers: makeHeaders(apiKey),
-    });
+    const res = await fetch(`${url}/health`);
     return res.ok;
   } catch {
     return false;
   }
 };
 
-// ─── Runs ─────────────────────────────────────────────────────────────────────
+// =============================================================================
+// RUNS
+// =============================================================================
 
-/** GET /api/runs - Fetches a list of all test runs */
+/** GET /runs */
 export const fetchRuns = async (): Promise<Run[]> => {
-  const data = await apiFetch<any>(`${BASE_URL}/runs`, {
-    headers: makeHeaders(),
-  });
-
-  const runsArray = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.runs)
-    ? data.runs
-    : [];
-
-  // ✅ normalize backend → frontend
-  return runsArray.map((run: any) => ({
-    runid: run.run_id,                 // ⭐ FIX
-    name: run.name,
-    description: run.description,
-    status: run.status,
-    components: run.components,
-    createdAt: run.created_at,         // ⭐ FIX
-    updatedAt: run.updated_at,         // ⭐ FIX
-  }));
+  const data = await apiFetch<any>(`${BASE_URL}/runs`);
+  const arr: any[] = Array.isArray(data) ? data : data?.runs ?? [];
+  return arr.map(normalizeRun);
 };
 
-/** POST /api/runs - Creates a new test run */
+/** GET /runs/{runId} */
+export const fetchRun = async (runId: string): Promise<Run> => {
+  const raw = await apiFetch<any>(`${BASE_URL}/runs/${runId}`);
+  return normalizeRun(raw);
+};
+
+/**
+ * POST /runs
+ * Creates run in IDLE state — does NOT start execution.
+ * graph_config.graph_type determines 'automatic' | 'manual'.
+ */
 export const createRun = async (request: CreateRunRequest): Promise<Run> => {
-  const run = await apiFetch<any>(`${BASE_URL}/runs`, {
+  const raw = await apiFetch<any>(`${BASE_URL}/runs`, {
     method: 'POST',
-    headers: makeHeaders(),
     body: JSON.stringify(request),
   });
-
-  // ✅ normalize just like fetchRuns
-  return {
-    runid: run.run_id,
-    name: run.name,
-    description: run.description,
-    status: run.status,
-    components: run.components,
-    createdAt: run.created_at,
-    updatedAt: run.updated_at,
-  };
+  return normalizeRun(raw);
 };
 
-/** PATCH /api/runs/{runId} - Updates an existing test run */
-export const updateRun = async(
-  runId: string,
-  request: UpdateRunRequest
-): Promise<Run> =>{
-  const run = await apiFetch<any>(`${BASE_URL}/runs/${runId}`, {
+/**
+ * PATCH /runs/{runId}
+ * Update metadata and dynamic strategy parameters before starting a run.
+ * The request payload strictly sends name, description, and strategy_params.
+ */
+export const updateRun = async (runId: string, request: UpdateRunRequest): Promise<Run> => {
+  const raw = await apiFetch<any>(`${BASE_URL}/runs/${runId}`, {
     method: 'PATCH',
-    headers: makeHeaders(),
     body: JSON.stringify(request),
   });
-  return {
-    runid: run.run_id,
-    name: run.name,
-    description: run.description,
-    status: run.status,
-    components: run.components,
-    createdAt: run.created_at,
-    updatedAt: run.updated_at,
-  };}
+  return normalizeRun(raw);
+};
 
-/** DELETE /api/runs/{runId} - Deletes a test run */
+/** DELETE /runs/{runId} */
 export const deleteRun = (runId: string): Promise<void> =>
-  apiFetch<void>(`${BASE_URL}/runs/${runId}`, {
+  apiFetch<void>(`${BASE_URL}/runs/${runId}`, { method: 'DELETE' });
+
+// =============================================================================
+// AUTOMATIC EXECUTION
+// =============================================================================
+
+/**
+ * POST /runs/{runId}/start
+ * Starts an AUTOMATIC run. Call updateRun (PATCH) first to sync UI config.
+ */
+export const startAutomaticRun = async (
+  runId: string,
+  request?: StartAutomaticRunRequest
+): Promise<StartAutomaticRunResponse> =>
+  apiFetch<StartAutomaticRunResponse>(`${BASE_URL}/runs/${runId}/start`, {
+    method: 'POST',
+    body: JSON.stringify(request ?? {}),
+  });
+
+/** POST /runs/{runId}/stop */
+export const stopRun = (runId: string): Promise<void> =>
+  apiFetch<void>(`${BASE_URL}/runs/${runId}/stop`, { method: 'POST' });
+
+// =============================================================================
+// MANUAL EXECUTION (Human-in-the-Loop)
+// =============================================================================
+
+/**
+ * POST /runs/{runId}/sessions
+ * Creates a new chat session. Returns session_id.
+ * After calling: emit join_session_room({ session_id }) over WebSocket.
+ */
+export const createManualSession = async (
+  runId: string,
+  request: CreateManualSessionRequest
+): Promise<ManualSessionResponse> =>
+  apiFetch<ManualSessionResponse>(`${BASE_URL}/runs/${runId}/sessions`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+
+/**
+ * POST /runs/{runId}/sessions/{sessionId}/manual_turn
+ * Submits one user prompt. Disable input after calling; re-enable on run_idle WS event.
+ *
+ * ⚠ DO NOT render attack.prompt as the user bubble.
+ *    Use attack.metadata.user_input instead.
+ */
+export const submitManualTurn = async (
+  runId: string,
+  sessionId: string,
+  request: SubmitManualTurnRequest
+): Promise<SubmitManualTurnResponse> =>
+  apiFetch<SubmitManualTurnResponse>(
+    `${BASE_URL}/runs/${runId}/sessions/${sessionId}/manual_turn`,
+    {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }
+  );
+
+/**
+ * GET /runs/{runId}/sessions/{sessionId}/history
+ * Render user bubbles from turn.metadata.user_input — NOT turn.content.
+ */
+export const getManualSessionHistory = async (
+  runId: string,
+  sessionId: string
+): Promise<ManualTurnHistoryResponse> =>
+  apiFetch<ManualTurnHistoryResponse>(
+    `${BASE_URL}/runs/${runId}/sessions/${sessionId}/history`
+  );
+
+/** GET /runs/{runId}/sessions/{sessionId} */
+export const getManualSession = async (
+  runId: string,
+  sessionId: string
+): Promise<ManualSessionResponse> =>
+  apiFetch<ManualSessionResponse>(`${BASE_URL}/runs/${runId}/sessions/${sessionId}`);
+
+/** GET /runs/{runId}/sessions */
+export const fetchManualSessions = async (runId: string): Promise<ManualSessionResponse[]> => {
+  const data = await apiFetch<any>(`${BASE_URL}/runs/${runId}/sessions`);
+  return Array.isArray(data) ? data : data?.sessions ?? [];
+};
+
+// =============================================================================
+// DISCOVERY
+// =============================================================================
+
+/** GET /strategies — fetch all strategies + schemas for dynamic form building */
+export const getStrategies = async (): Promise<StrategySchema[]> => {
+  const data = await apiFetch<any>(`${BASE_URL}/strategies`);
+  return Array.isArray(data) ? data : data?.strategies ?? [];
+};
+
+/** GET /strategies/{name}/schema */
+export const getStrategySchema = async (name: string): Promise<StrategySchema> =>
+  apiFetch<StrategySchema>(`${BASE_URL}/strategies/${name}/schema`);
+
+/** GET /providers */
+export const getProviders = async (): Promise<Provider[]> => {
+  const data = await apiFetch<any>(`${BASE_URL}/providers`);
+  return Array.isArray(data) ? data : data?.providers ?? [];
+};
+
+/** GET /nodes/{type} — 'attack' | 'defense' | 'evaluation' */
+export const getNodes = async (
+  nodeType: 'attack' | 'defense' | 'evaluation'
+): Promise<NodeSchema[]> => {
+  const data = await apiFetch<any>(`${BASE_URL}/nodes/${nodeType}`);
+  return Array.isArray(data) ? data : data?.nodes ?? [];
+};
+
+// =============================================================================
+// LEGACY manual API (api_manual.ts compatibility) — for existing ManualAttackPage
+// =============================================================================
+
+export const fetchManualConfig = (runId: string) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/config`);
+
+export const updateManualConfig = (runId: string, config: any) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/config`, {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  });
+
+export const addTurn = (runId: string, sessionId: string, body: any) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}/turns`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const saveSession = (runId: string, sessionId: string, body?: any) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}/save`, {
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+  });
+
+export const fetchManualStats = (runId: string) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/stats`);
+
+export const deleteManualSession = (runId: string, sessionId: string) =>
+  apiFetch<void>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}`, {
     method: 'DELETE',
-    headers: makeHeaders(),
   });
 
-// ─── Attack Configuration ─────────────────────────────────────────────────────
+export const fetchManualSession = (runId: string | null, sessionId: string) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}`);
 
-/** GET /api/runs/{runId}/attack/config - Retrieves attack configuration */
-export const fetchAttackConfig = (runId: string): Promise<AttackConfig> =>
-  apiFetch<AttackConfig>(`${BASE_URL}/runs/${runId}/attack/config`, {
-    headers: makeHeaders(),
-  });
-
-/** PUT /api/runs/{runId}/attack/config - Creates or updates attack configuration */
-export const updateAttackConfig = (
-  runId: string,
-  config: AttackConfig,
-  apiKey?: string
-): Promise<AttackConfig> =>
-  apiFetch<AttackConfig>(`${BASE_URL}/runs/${runId}/attack/config`, {
-    method: 'PUT',
-    headers: makeHeaders(apiKey),
-    body: JSON.stringify(config),
-  });
-
-// ─── Attack Operations ────────────────────────────────────────────────────────
-
-/** GET /api/runs/{runId}/attack/prompts - Retrieves all generated attack prompts */
-export const fetchAttackPrompts = (runId: string): Promise<AttackPrompt[]> =>
-  apiFetch<AttackPrompt[]>(`${BASE_URL}/runs/${runId}/attack/prompts`, {
-    headers: makeHeaders(),
-  });
-
-/** GET /api/runs/{runId}/attack/stats - Retrieves attack statistics */
-export const fetchAttackStats = (runId: string): Promise<AttackStats> =>
-  apiFetch<AttackStats>(`${BASE_URL}/runs/${runId}/attack/stats`, {
-    headers: makeHeaders(),
-  });
-
-/** POST /api/runs/{runId}/attack/start - Starts or resumes attack generation */
-export const startAttack = (
-  runId: string,
-  request?: StartAttackRequest,
-  apiKey?: string
-): Promise<StartAttackResponse> =>
-  apiFetch<StartAttackResponse>(`${BASE_URL}/runs/${runId}/attack/start`, {
-    method: 'POST',
-    headers: makeHeaders(apiKey),
-    body: JSON.stringify(request || {}),
-  });
-
-/** POST /api/runs/{runId}/attack/stop - Stops the ongoing attack generation */
-export const stopAttack = (runId: string): Promise<StopAttackResponse> =>
-  apiFetch<StopAttackResponse>(`${BASE_URL}/runs/${runId}/attack/stop`, {
-    method: 'POST',
-    headers: makeHeaders(),
-  });
-
-// ─── Defense Configuration ────────────────────────────────────────────────────
-
-/** GET /api/runs/{runId}/defense/config - Retrieves defense configuration */
-export const fetchDefenseConfig = (runId: string): Promise<DefenseConfig> =>
-  apiFetch<DefenseConfig>(`${BASE_URL}/runs/${runId}/defense/config`, {
-    headers: makeHeaders(),
-  });
-
-/** PUT /api/runs/{runId}/defense/config - Creates or updates defense configuration */
-export const updateDefenseConfig = (
-  runId: string,
-  config: DefenseConfig,
-  apiKey?: string
-): Promise<DefenseConfig> =>
-  apiFetch<DefenseConfig>(`${BASE_URL}/runs/${runId}/defense/config`, {
-    method: 'PUT',
-    headers: makeHeaders(apiKey),
-    body: JSON.stringify(config),
-  });
-
-// ─── Defense Operations ───────────────────────────────────────────────────────
-
-/** GET /api/runs/{runId}/defense/responses - Retrieves all defense responses */
-export const fetchDefenseResponses = (runId: string): Promise<DefenseResponse[]> =>
-  apiFetch<DefenseResponse[]>(`${BASE_URL}/runs/${runId}/defense/responses`, {
-    headers: makeHeaders(),
-  });
-
-/** GET /api/runs/{runId}/defense/stats - Retrieves defense statistics */
-export const fetchDefenseStats = (runId: string): Promise<DefenseStats> =>
-  apiFetch<DefenseStats>(`${BASE_URL}/runs/${runId}/defense/stats`, {
-    headers: makeHeaders(),
-  });
-
-// ─── Legacy Compatibility (if needed) ─────────────────────────────────────────
-// These functions can be kept for backwards compatibility during migration
-
-/** @deprecated Use updateAttackConfig and startAttack instead */
-export const startAttackLegacy = async (
-  runId: string,
-  config: AttackConfig,
-  apiKey?: string
-): Promise<AttackPrompt[]> => {
-  // First update config
-  await updateAttackConfig(runId, config, apiKey);
-  // Then start attack
-  await startAttack(runId, { resumeFromLastSaved: false }, apiKey);
-  // Return prompts (they'll come via WebSocket in real implementation)
-  return fetchAttackPrompts(runId);
-};
-
-/** @deprecated Use updateDefenseConfig and fetch stats separately */
-export const startDefenseEvaluation = async (
-  runId: string,
-  config: DefenseConfig,
-  apiKey?: string
-): Promise<DefenseStats> => {
-  // Update config
-  await updateDefenseConfig(runId, config, apiKey);
-  // Fetch and return stats (evaluation happens server-side)
-  return fetchDefenseStats(runId);
-};
+// Resolves run start mode from graph config
+export type RunStartMode = 'automatic' | 'manual';
+export const resolveRunStartMode = (graphConfig: GraphConfig): RunStartMode =>
+  graphConfig.graph_type === 'manual' ? 'manual' : 'automatic';

@@ -1,55 +1,55 @@
 // store/manualStore.ts
-// ─── Manual Attack Zustand Store ──────────────────────────────────────────────
-// Import and spread this store into your existing appStore, or use it standalone.
-
 import { create } from 'zustand';
 import {
   ChatSession,
   ChatTurn,
   ManualRunConfig,
   ManualRunStats,
-  EvaluationLabel,
 } from '../types/manual';
 
 interface ManualState {
-  manualConfig: ManualRunConfig | null;
-
-  activeSession: ChatSession | null;
-
-  sessions: ChatSession[];
-
-  manualStats: ManualRunStats | null;
-
+  manualConfig:    ManualRunConfig | null;
+  activeSession:   ChatSession | null;
+  sessions:        ChatSession[];
+  manualStats:     ManualRunStats | null;
   isSavingSession: boolean;
-  manualError: string | null;
+  isWaitingForResponse: boolean; // true while a manual turn is processing
+  manualError:     string | null;
 
-  // actions
+  // Config
   setManualConfig: (config: ManualRunConfig) => void;
 
-  setSessions: (sessions: ChatSession[]) => void;
-  addSession: (session: ChatSession) => void;
+  // Sessions list
+  setSessions:   (sessions: ChatSession[]) => void;
+  addSession:    (session: ChatSession)    => void;
   updateSession: (sessionId: string, patch: Partial<ChatSession>) => void;
-  removeSession: (sessionId: string) => void;
+  removeSession: (sessionId: string)      => void;
 
-  // ✅ NEW
-  setActiveSession: (session: ChatSession | null) => void;
-  appendTurnToActiveSession: (turn: ChatTurn) => void;
+  // Active session
+  setActiveSession:          (session: ChatSession | null) => void;
+  appendTurnToActiveSession: (turn: ChatTurn)              => void;
+  updateTurnInActiveSession: (turnId: string, patch: Partial<ChatTurn>) => void;
 
+  // Stats
   setManualStats: (stats: ManualRunStats) => void;
 
-  setIsSavingSession: (v: boolean) => void;
-  setManualError: (msg: string | null) => void;
+  // Status flags
+  setIsSavingSession:      (v: boolean)      => void;
+  setIsWaitingForResponse: (v: boolean)      => void;
+  setManualError:          (msg: string | null) => void;
 
+  // Reset
   resetManualState: () => void;
 }
 
 const defaultState = {
-  manualConfig: null,
-  activeSession: null,
-  sessions: [],
-  manualStats: null,
-  isSavingSession: false,
-  manualError: null,
+  manualConfig:         null,
+  activeSession:        null,
+  sessions:             [] as ChatSession[],
+  manualStats:          null,
+  isSavingSession:      false,
+  isWaitingForResponse: false,
+  manualError:          null,
 };
 
 export const useManualStore = create<ManualState>((set) => ({
@@ -60,13 +60,11 @@ export const useManualStore = create<ManualState>((set) => ({
   setSessions: (sessions) => set({ sessions }),
 
   addSession: (session) =>
-    set((s) => ({
-      sessions: [session, ...s.sessions],
-    })),
+    set(s => ({ sessions: [session, ...s.sessions] })),
 
   updateSession: (sessionId, patch) =>
-    set((s) => ({
-      sessions: s.sessions.map((sess) =>
+    set(s => ({
+      sessions: s.sessions.map(sess =>
         sess.session_id === sessionId ? { ...sess, ...patch } : sess
       ),
       activeSession:
@@ -76,8 +74,8 @@ export const useManualStore = create<ManualState>((set) => ({
     })),
 
   removeSession: (sessionId) =>
-    set((s) => ({
-      sessions: s.sessions.filter((sess) => sess.session_id !== sessionId),
+    set(s => ({
+      sessions: s.sessions.filter(sess => sess.session_id !== sessionId),
       activeSession:
         s.activeSession?.session_id === sessionId ? null : s.activeSession,
     })),
@@ -85,7 +83,7 @@ export const useManualStore = create<ManualState>((set) => ({
   setActiveSession: (session) => set({ activeSession: session }),
 
   appendTurnToActiveSession: (turn) =>
-    set((s) => {
+    set(s => {
       if (!s.activeSession) return {};
       return {
         activeSession: {
@@ -95,34 +93,23 @@ export const useManualStore = create<ManualState>((set) => ({
       };
     }),
 
-  setManualStats: (manualStats) => set({ manualStats }),
+  updateTurnInActiveSession: (turnId, patch) =>
+    set(s => {
+      if (!s.activeSession) return {};
+      return {
+        activeSession: {
+          ...s.activeSession,
+          turns: s.activeSession.turns.map(t =>
+            t.turn_id === turnId ? { ...t, ...patch } : t
+          ),
+        },
+      };
+    }),
 
-  setIsSavingSession: (isSavingSession) => set({ isSavingSession }),
-  setManualError: (manualError) => set({ manualError }),
+  setManualStats:          (manualStats)          => set({ manualStats }),
+  setIsSavingSession:      (isSavingSession)      => set({ isSavingSession }),
+  setIsWaitingForResponse: (isWaitingForResponse) => set({ isWaitingForResponse }),
+  setManualError:          (manualError)          => set({ manualError }),
 
   resetManualState: () => set({ ...defaultState }),
 }));
-
-// ─── WebSocket integration helper ─────────────────────────────────────────────
-// Call this from your websocket.ts setupEventListeners() block:
-//
-//   this.socket.on('manual_session_created', (data) => {
-//     const { addSession } = useManualStore.getState();
-//     if (activeRunId === data.runId) addSession(data.session);
-//   });
-//
-//   this.socket.on('manual_turn_added', (data) => {
-//     const { appendActiveTurn, activeSessionId } = useManualStore.getState();
-//     if (data.sessionId === activeSessionId) appendActiveTurn(data.turn);
-//   });
-//
-//   this.socket.on('manual_session_evaluated', (data) => {
-//     const { updateSession } = useManualStore.getState();
-//     updateSession(data.sessionId, {
-//       status: 'evaluated',
-//       evaluation_score: data.evaluation.score,
-//       evaluation_label: data.evaluation.label,
-//       evaluation_reasoning: data.evaluation.reasoning,
-//       defense_filter_used: data.defense_filter_used,
-//     });
-//   });
