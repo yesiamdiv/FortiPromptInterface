@@ -40,27 +40,27 @@ const TEMPLATES = [
     name: 'Full Security Pipeline',
     description: 'Attack + Defense auto-loop',
     mode: 'automatic' as RunMode,
-    attackNode: 'llm_attack',
-    defenseNode: 'heuristic_defense',
-    evaluationNode: 'llm_eval',
-    strategy: 'iterative_improvement',
+    attackNode: 'default_attack',
+    defenseNode: 'default_defence',
+    evaluationNode: 'default_eval',
+    strategy: 'default',
   },
   {
     name: 'Attack Only',
     description: 'Generate adversarial prompts',
     mode: 'automatic' as RunMode,
-    attackNode: 'llm_attack',
+    attackNode: 'default_attack',
     defenseNode: 'none',
     evaluationNode: 'none',
-    strategy: 'jailbreak',
+    strategy: 'default',
   },
   {
     name: 'Defense Evaluation',
     description: 'Evaluate guardrail strength',
     mode: 'automatic' as RunMode,
     attackNode: 'none',
-    defenseNode: 'heuristic_defense',
-    evaluationNode: 'llm_eval',
+    defenseNode: 'default_defence',
+    evaluationNode: 'default_eval',
     strategy: 'default',
   },
   {
@@ -97,10 +97,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
   const [newDesc,    setNewDesc]    = useState('');
 
   // New: Node and Strategy selection state
-  const [selectedAttackNode,     setSelectedAttackNode]     = useState('llm_attack');
-  const [selectedDefenseNode,    setSelectedDefenseNode]    = useState('heuristic_defense');
-  const [selectedEvaluationNode, setSelectedEvaluationNode] = useState('llm_eval');
-  const [selectedStrategy,       setSelectedStrategy]       = useState('default');
+  const [selectedAttackNode,     setSelectedAttackNode]     = useState('none');
+  const [selectedDefenseNode,    setSelectedDefenseNode]    = useState('none');
+  const [selectedEvaluationNode, setSelectedEvaluationNode] = useState('none');
+  const [selectedStrategy,       setSelectedStrategy]       = useState('none');
 
   // Discovery data
   const [strategies,       setStrategies]       = useState<StrategySchema[]>([]);
@@ -152,10 +152,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
         setEvalNodeTypes(evalNodes);
 
         // Set initial selections based on defaults or first available
-        if (attackNodes.length > 0 && selectedAttackNode === 'llm_attack') setSelectedAttackNode(attackNodes[0].node_name);
-        if (defenseNodes.length > 0 && selectedDefenseNode === 'heuristic_defense') setSelectedDefenseNode(defenseNodes[0].node_name);
-        if (evalNodes.length > 0 && selectedEvaluationNode === 'llm_eval') setSelectedEvaluationNode(evalNodes[0].node_name);
-        if (strats.length > 0 && selectedStrategy === 'default') setSelectedStrategy(strats[0].strategy_name);
+        if (attackNodes.length > 0 && selectedAttackNode === 'none') setSelectedAttackNode(attackNodes[0].node_name);
+        if (defenseNodes.length > 0 && selectedDefenseNode === 'none') setSelectedDefenseNode(defenseNodes[0].node_name);
+        if (evalNodes.length > 0 && selectedEvaluationNode === 'none') setSelectedEvaluationNode(evalNodes[0].node_name);
+        if (strats.length > 0 && selectedStrategy === 'none') setSelectedStrategy(strats[0].strategy_name);
 
       } catch (e: any) {
         setError(e.message);
@@ -172,16 +172,16 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
     setRunMode(mode);
     // Reset node/strategy selections to defaults for the new mode if applicable
     if (mode === 'manual') {
-      setSelectedAttackNode('none');
-      setSelectedDefenseNode('none');
-      setSelectedEvaluationNode('none');
+      // setSelectedAttackNode('default');
+      // setSelectedDefenseNode('default');
+      // setSelectedEvaluationNode('default');
       setSelectedStrategy('manual');
     } else {
       // Automated defaults
-      setSelectedAttackNode('llm_attack');
-      setSelectedDefenseNode('heuristic_defense');
-      setSelectedEvaluationNode('llm_eval');
-      setSelectedStrategy('default');
+      // setSelectedAttackNode('default');
+      // setSelectedDefenseNode('default');
+      // setSelectedEvaluationNode('default');
+      setSelectedStrategy('none');
     }
   };
 
@@ -198,7 +198,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
   };
 
   const canAdvanceType   = newName.trim().length > 0;
-  const canAdvanceConfig = runMode === 'manual' || (
+
+  /*
+  we need to have option of slecting the various nodes even incase of manual also.
+  */
+  const canAdvanceConfig =(
     (selectedAttackNode && selectedDefenseNode && selectedEvaluationNode && selectedStrategy)
   );
 
@@ -219,7 +223,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
 
       const request: CreateRunRequest = {
         name:        newName.trim(),
-        description: newDesc.trim() || undefined,
+        description: newDesc.trim() || '',
         config:      runConfig, // Use the new RunConfig structure
         payload:     { }, // Optional: Add runtime_config or initial_prompt here if needed later
       };
@@ -259,10 +263,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
     setNewName('');
     setNewDesc('');
     // Reset node/strategy selections to initial defaults
-    setSelectedAttackNode('llm_attack');
-    setSelectedDefenseNode('heuristic_defense');
-    setSelectedEvaluationNode('llm_eval');
-    setSelectedStrategy('default');
+    // Set initial selections based on defaults or first available
+        if (attackNodeTypes.length > 0) setSelectedAttackNode(attackNodeTypes[0].node_name); else setSelectedAttackNode('none');
+        if (defenseNodeTypes.length > 0) setSelectedDefenseNode(defenseNodeTypes[0].node_name); else setSelectedDefenseNode('none');
+        if (evalNodeTypes.length > 0) setSelectedEvaluationNode(evalNodeTypes[0].node_name); else setSelectedEvaluationNode('none');
+        if (strategies.length > 0) setSelectedStrategy(strategies[0].strategy_name); else setSelectedStrategy('none');
   };
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -672,12 +677,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
               {/* STEP 2: CONFIGURATION */}
               {wizardStep === 'config' && (
                 <>
-                  {runMode === 'manual' ? (
-                    <div className="db-callout">
-                      Manual runs use a fixed strategy and do not require node configuration.
-                      Click <strong>Next</strong> to review.
-                    </div>
-                  ) : loadingNodes ? (
+                  {
+                  // runMode === 'manual' ? (
+                  //   <div className="db-callout">
+                  //     Manual runs use a fixed strategy and do not require node configuration.
+                  //     Click <strong>Next</strong> to review.
+                  //   </div>
+                  // ) :
+                   loadingNodes ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 10 }}>
                       <Loader size={18} style={{ animation: 'db-spin .7s linear infinite' }} />
                       <span style={{ fontSize: 13, color: '#888' }}>Loading configuration options…</span>
