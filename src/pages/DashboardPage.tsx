@@ -3,7 +3,7 @@ import {
   Plus, Play, Pause, Trash2, Edit, AlertCircle, MessageSquare,
   Zap, Shield, Settings, ChevronRight, Loader, RefreshCw, Layers, SlidersHorizontal,
 } from 'lucide-react';
-import { Run, ComponentType, CreateRunRequest, GraphConfig, StrategySchema, NodeSchema, RunConfig } from '../types';
+import { Run, ComponentType, CreateRunRequest, StrategySchema, NodeSchema, RunConfig } from '../types';
 import { useAppStore, componentLabels } from '../store/appStore';
 import {
   fetchRuns, createRun, deleteRun,
@@ -234,8 +234,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
       resetRunState();
 
       // For manual: immediately create a session and navigate
-      // Determine graph_type from the created run's returned graph_config
-      if (created.graph_config?.graph_type === 'manual') {
+      // Determine graph_type from the created run's returned config
+      if (created.config?.graph_type === 'manual') {
         try {
           const session = await createManualSession(created.runid, {
             name: `Session 1`,
@@ -531,7 +531,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
         ) : (
           <div className="db-grid">
             {runs.map(run => {
-              const isManual = run.graph_config?.graph_type === 'manual'; // Use graph_config to determine type
+              const isManual = run.config?.graph_type === 'manual'; // Use config to determine type
               const statusStyle = STATUS_STYLES[run.status] ?? STATUS_STYLES.idle;
               return (
                 <div key={run.runid} className={`db-run-card ${isManual ? 'manual' : ''}`}>
@@ -554,24 +554,24 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
                         </span>
                       ) : (
                         <>
-                          {run.graph_config?.strategy_params?.attack_node_config?.node_type && (
+                          {run.config?.attack_node_config?.node_type && (
                             <span className="db-run-comp" style={{ background: COMP_STYLES.attack.bg, color: COMP_STYLES.attack.color, borderColor: COMP_STYLES.attack.border }}>
-                              <Zap size={9}/> {run.graph_config.strategy_params.attack_node_config.node_type}
+                              <Zap size={9}/> {run.config.attack_node_config.node_type}
                             </span>
                           )}
-                          {run.graph_config?.strategy_params?.defense_node_config?.node_type && (
+                          {run.config?.defense_node_config?.node_type && (
                             <span className="db-run-comp" style={{ background: COMP_STYLES.defense.bg, color: COMP_STYLES.defense.color, borderColor: COMP_STYLES.defense.border }}>
-                              <Shield size={9}/> {run.graph_config.strategy_params.defense_node_config.node_type}
+                              <Shield size={9}/> {run.config.defense_node_config.node_type}
                             </span>
                           )}
-                          {run.graph_config?.strategy_params?.evaluation_node_config?.node_type && (
+                          {run.config?.evaluation_node_config?.node_type && (
                             <span className="db-run-comp" style={{ background: '#ECFDF5', color: '#047857', borderColor: '#A7F3D0' }}>
-                              <Layers size={9}/> {run.graph_config.strategy_params.evaluation_node_config.node_type}
+                              <Layers size={9}/> {run.config.evaluation_node_config.node_type}
                             </span>
                           )}
-                          {run.graph_config?.strategy_name && (
+                          {run.config?.strategy_config?.strategy_name && (
                             <span className="db-run-comp" style={{ background: '#E0F2FE', color: '#0369A1', borderColor: '#BAE6FD' }}>
-                              <SlidersHorizontal size={9}/> {run.graph_config.strategy_name}
+                              <SlidersHorizontal size={9}/> {run.config.strategy_config?.strategy_name}
                             </span>
                           )}
                         </>

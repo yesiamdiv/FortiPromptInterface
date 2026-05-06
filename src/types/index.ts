@@ -12,24 +12,55 @@ export interface ComponentLabel {
   color: string;
 }
 
+// ─── Node configs ──────────────────────────────────────────────────────────────
+
+export interface AttackNodeConfig {
+  node_type?: string;
+  [key: string]: any;
+}
+
+export interface DefenseNodeConfig {
+  node_type?: string;
+  [key: string]: any;
+}
+
+export interface EvaluationNodeConfig {
+  node_type?: string;
+  [key: string]: any;
+}
+
+export interface StrategyConfig {
+  strategy_name?: string;
+  strategy_params?: Record<string, any>;
+}
+
+/**
+ * RunConfig replaces GraphConfig.
+ * Used in CreateRunRequest.config and reflected in Run.config.
+ * All sub-fields optional — backend ignores unknown extras.
+ */
+export interface RunConfig {
+  graph_type: 'automatic' | 'manual';
+  attack_node_config?: AttackNodeConfig;
+  defense_node_config?: DefenseNodeConfig;
+  evaluation_node_config?: EvaluationNodeConfig;
+  strategy_config?: StrategyConfig;
+}
+
+// ─── Run ───────────────────────────────────────────────────────────────────────
+
 export interface Run {
   runid: string;
   name: string;
   description?: string;
   status: RunStatus;
   components: ComponentType[];
-  graph_config?: GraphConfig;
+  config?: RunConfig;
   createdAt: string;
   updatedAt: string;
 }
 
-// ─── Graph / Strategy ──────────────────────────────────────────────────────────
-
-export interface GraphConfig {
-  strategy_name: string;
-  strategy_params?: Record<string, any>;
-  graph_type: 'automatic' | 'manual';
-}
+// ─── Discovery ─────────────────────────────────────────────────────────────────
 
 export interface StrategySchema {
   strategy_name: string;
@@ -51,28 +82,27 @@ export interface NodeSchema {
 
 // ─── Run Requests ──────────────────────────────────────────────────────────────
 
-export interface RunConfig {
-  graph_type: 'automatic' | 'manual';
-  attack_node_config?: { node_type: string; };
-  defense_node_config?: { node_type: string; };
-  evaluation_node_config?: { node_type: string; };
-  strategy_config: { strategy_name: string; strategy_params?: Record<string, any>; };
-}
-
 export interface CreateRunRequest {
   name: string;
   description?: string;
-  config: RunConfig; // New: top-level config object
+  config: RunConfig;
   payload?: Record<string, any>;
 }
 
+/**
+ * PATCH /runs/{runId} — flattened, no nested graph_config.
+ * Backend ignores unknown fields so extra context is safe to send.
+ */
 export interface UpdateRunRequest {
   name?: string;
   description?: string;
-  strategy_params?: Record<string, any>; // Sent directly at the root now[cite: 4]
+  strategy_params?: Record<string, any>;
+  attack_node_params?: Record<string, any>;
+  defense_node_params?: Record<string, any>;
+  evaluation_node_params?: Record<string, any>;
 }
 
-// ─── Run Progress (WebSocket) ──────────────────────────────────────────────────
+// ─── Run Progress ──────────────────────────────────────────────────────────────
 
 export interface RunProgress {
   current: number;
@@ -81,7 +111,7 @@ export interface RunProgress {
   progress_percent: number;
 }
 
-// ─── Automatic Run Operations ──────────────────────────────────────────────────
+// ─── Automatic Run ─────────────────────────────────────────────────────────────
 
 export interface StartAutomaticRunRequest {
   runtime_config?: Record<string, any>;
@@ -152,53 +182,29 @@ export interface WSJoinRunChannel   { runId: string; }
 export interface WSLeaveRunChannel  { runId: string; }
 
 export interface WSRunStarted {
-  run_id: string;
-  strategy: string;
-  timestamp: string;
-  session_id?: string;
+  run_id: string; strategy: string; timestamp: string; session_id?: string;
 }
-
 export interface WSRunProgress {
-  run_id: string;
-  current: number;
-  total: number;
-  message: string;
-  progress_percent: number;
+  run_id: string; current: number; total: number; message: string; progress_percent: number;
 }
-
 export interface WSRunCompleted {
-  run_id: string;
-  total_attempts: number;
-  timestamp: string;
+  run_id: string; total_attempts: number; timestamp: string;
 }
-
 export interface WSRunError {
-  run_id: string;
-  error: string;
-  error_type?: string;
+  run_id: string; error: string; error_type?: string;
 }
-
 export interface WSNewRunAvailable {
-  run_id: string;
-  run_summary: { name: string; strategy: string; status: string };
+  run_id: string; run_summary: { name: string; strategy: string; status: string };
 }
-
 export interface WSAttackGenerated {
-  runId: string;
-  prompt: AttackPrompt;
+  runId: string; prompt: AttackPrompt;
 }
-
 export interface WSDefenseResponseGenerated {
-  runId: string;
-  response: DefenseResponse;
+  runId: string; response: DefenseResponse;
 }
-
 export interface WSAttackStats {
-  runId: string;
-  stats: AttackStats;
+  runId: string; stats: AttackStats;
 }
-
 export interface WSDefenseStats {
-  runId: string;
-  stats: DefenseStats;
+  runId: string; stats: DefenseStats;
 }

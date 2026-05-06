@@ -9,9 +9,11 @@ import {
   ComponentType,
   ComponentLabel,
   RunProgress,
+  NodeSchema,
+  StrategySchema,
 } from '../types';
 
-// ─── Component label map ────────────────────────────────────────────────────────
+// ─── Component label map ───────────────────────────────────────────────────────
 
 export const componentLabels: Record<ComponentType, ComponentLabel> = {
   attack:  { name: 'Attack Testing',  icon: Zap,           color: '#EF4444' },
@@ -19,70 +21,95 @@ export const componentLabels: Record<ComponentType, ComponentLabel> = {
   manual:  { name: 'Manual Attack',   icon: MessageSquare, color: '#6366F1' },
 };
 
-// ─── Store shape ────────────────────────────────────────────────────────────────
+// ─── Discovery state (loaded once per run, shared by RunConfigPanel) ───────────
+
+export interface RunDiscovery {
+  attackNodes:     NodeSchema[];
+  defenseNodes:    NodeSchema[];
+  evalNodes:       NodeSchema[];
+  strategies:      StrategySchema[];
+  loadedForRunId:  string | null;
+  loading:         boolean;
+}
+
+// ─── Store shape ───────────────────────────────────────────────────────────────
 
 interface AppState {
   // Runs
-  runs: Run[];
+  runs:        Run[];
   activeRunId: string | null;
 
-  // Run execution progress (for automatic runs)
+  // Progress (automatic run)
   runProgress: RunProgress | null;
+
+  // Discovery cache — shared across pages via RunConfigPanel
+  runDiscovery: RunDiscovery;
 
   // Attack
   attackPrompts: AttackPrompt[];
-  attackStats: AttackStats | null;
-  isAttacking: boolean;
-  attackError: string | null;
+  attackStats:   AttackStats | null;
+  isAttacking:   boolean;
+  attackError:   string | null;
 
   // Defense
   defenseResponses: DefenseResponse[];
-  defenseStats: DefenseStats | null;
-  isEvaluating: boolean;
-  defenseError: string | null;
+  defenseStats:     DefenseStats | null;
+  isEvaluating:     boolean;
+  defenseError:     string | null;
 
   // Connection
   connectionStatus: 'idle' | 'testing' | 'connected' | 'failed';
 
-  // ─── Run actions ─────────────────────────────────────────────────────────────
+  // ── Run actions ──────────────────────────────────────────────────────────────
   setRuns:      (runs: Run[]) => void;
   addRun:       (run: Run)    => void;
   updateRun:    (id: string, patch: Partial<Run>) => void;
   deleteRun:    (id: string)  => void;
   setActiveRun: (id: string | null) => void;
 
-  // ─── Progress ─────────────────────────────────────────────────────────────────
+  // ── Progress ─────────────────────────────────────────────────────────────────
   setRunProgress: (p: RunProgress | null) => void;
 
-  // ─── Attack actions ───────────────────────────────────────────────────────────
+  // ── Discovery ────────────────────────────────────────────────────────────────
+  setRunDiscovery: (d: Partial<RunDiscovery>) => void;
+
+  // ── Attack actions ────────────────────────────────────────────────────────────
   setAttackPrompts:   (prompts: AttackPrompt[]) => void;
   addAttackPrompt:    (prompt: AttackPrompt)    => void;
-  clearAttackPrompts: () => void;
-  setAttackStats:     (stats: AttackStats)      => void;
-  setIsAttacking:     (v: boolean)              => void;
-  setAttackError:     (msg: string | null)      => void;
+  clearAttackPrompts: ()                         => void;
+  setAttackStats:     (stats: AttackStats)       => void;
+  setIsAttacking:     (v: boolean)               => void;
+  setAttackError:     (msg: string | null)       => void;
 
-  // ─── Defense actions ──────────────────────────────────────────────────────────
+  // ── Defense actions ───────────────────────────────────────────────────────────
   setDefenseResponses:   (responses: DefenseResponse[]) => void;
   addDefenseResponse:    (response: DefenseResponse)    => void;
-  clearDefenseResponses: () => void;
-  setDefenseStats:       (stats: DefenseStats)          => void;
-  setIsEvaluating:       (v: boolean)                   => void;
-  setDefenseError:       (msg: string | null)           => void;
+  clearDefenseResponses: ()                              => void;
+  setDefenseStats:       (stats: DefenseStats)           => void;
+  setIsEvaluating:       (v: boolean)                    => void;
+  setDefenseError:       (msg: string | null)            => void;
 
-  // ─── Connection ───────────────────────────────────────────────────────────────
+  // ── Connection ────────────────────────────────────────────────────────────────
   setConnectionStatus: (s: 'idle' | 'testing' | 'connected' | 'failed') => void;
 
-  // ─── Reset per-run state (call when opening a different run) ─────────────────
+  // ── Reset per-run transient state ─────────────────────────────────────────────
   resetRunState: () => void;
 }
 
-// ─── Store ───────────────────────────────────────────────────────────────────────
+const defaultDiscovery: RunDiscovery = {
+  attackNodes:    [],
+  defenseNodes:   [],
+  evalNodes:      [],
+  strategies:     [],
+  loadedForRunId: null,
+  loading:        false,
+};
 
 export const useAppStore = create<AppState>((set) => ({
   runs:        [],
   activeRunId: null,
   runProgress: null,
+  runDiscovery: defaultDiscovery,
 
   attackPrompts: [],
   attackStats:   null,
@@ -107,6 +134,9 @@ export const useAppStore = create<AppState>((set) => ({
   // Progress
   setRunProgress: (runProgress) => set({ runProgress }),
 
+  // Discovery
+  setRunDiscovery: (d) => set(s => ({ runDiscovery: { ...s.runDiscovery, ...d } })),
+
   // Attack
   setAttackPrompts:  (attackPrompts) => set({ attackPrompts }),
   addAttackPrompt:   (prompt)        => set(s => {
@@ -129,9 +159,10 @@ export const useAppStore = create<AppState>((set) => ({
   // Connection
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
 
-  // Reset run-specific state
+  // Reset transient run state (call when switching runs)
   resetRunState: () => set({
     runProgress:      null,
+    runDiscovery:     defaultDiscovery,
     attackPrompts:    [],
     attackStats:      null,
     isAttacking:      false,

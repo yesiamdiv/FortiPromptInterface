@@ -1,20 +1,19 @@
 // services/api.ts
 // ─── FortiPrompt REST API Client ─────────────────────────────────────────────
 //
-// Architecture:
-//   Automatic run: createRun → updateRun (PATCH) → startAutomaticRun (POST) → WS events
-//   Manual run:    createRun → createManualSession → submitManualTurn (repeat)
-//                  Listen to session_id WS room; disable input until run_idle fires.
+// Flow:
+//   Automatic: createRun (with RunConfig) → updateRun (PATCH flat params) → startAutomaticRun
+//   Manual:    createRun → createManualSession → submitManualTurn (repeat until run_idle)
 //
-// ⚠ Chat history rendering rule:
-//   User bubble  → turn.metadata.user_input   (NOT turn.content / attack.prompt)
-//   Defense/AI   → turn.content (for defense/target roles)
+// ⚠ Chat rendering rule:
+//   User bubble  → turn.metadata.user_input  (NEVER turn.content / attack.prompt)
+//   Defense/AI   → turn.content (for defense / target roles)
 
 import {
   Run,
   CreateRunRequest,
   UpdateRunRequest,
-  GraphConfig,
+  RunConfig,
   StrategySchema,
   Provider,
   NodeSchema,
@@ -34,22 +33,17 @@ import {
 
 const BASE_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api/v1';
 
-// ─── Generic fetch wrapper ────────────────────────────────────────────────────
+// ─── Generic fetch ────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
   });
-
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`[${res.status}] ${text}`);
   }
-
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
@@ -63,7 +57,7 @@ function normalizeRun(raw: any): Run {
     description: raw.description,
     status:      raw.status,
     components:  raw.components ?? [],
-    graph_config: raw.graph_config,
+    config:      raw.config ?? raw.graph_config, // accept either field name
     createdAt:   raw.created_at,
     updatedAt:   raw.updated_at,
   };
@@ -74,12 +68,7 @@ function normalizeRun(raw: any): Run {
 // =============================================================================
 
 export const testConnection = async (url: string): Promise<boolean> => {
-  try {
-    const res = await fetch(`${url}/health`);
-    return res.ok;
-  } catch {
-    return false;
-  }
+  try { return (await fetch(`${url}/health`)).ok; } catch { return false; }
 };
 
 // =============================================================================
@@ -94,36 +83,31 @@ export const fetchRuns = async (): Promise<Run[]> => {
 };
 
 /** GET /runs/{runId} */
-export const fetchRun = async (runId: string): Promise<Run> => {
-  const raw = await apiFetch<any>(`${BASE_URL}/runs/${runId}`);
-  return normalizeRun(raw);
-};
+export const fetchRun = async (runId: string): Promise<Run> =>
+  normalizeRun(await apiFetch<any>(`${BASE_URL}/runs/${runId}`));
 
 /**
  * POST /runs
- * Creates run in IDLE state — does NOT start execution.
- * graph_config.graph_type determines 'automatic' | 'manual'.
+ * Creates the run in IDLE state — does NOT start execution.
+ * graph_type inside config determines 'automatic' | 'manual'.
  */
-export const createRun = async (request: CreateRunRequest): Promise<Run> => {
-  const raw = await apiFetch<any>(`${BASE_URL}/runs`, {
+export const createRun = async (request: CreateRunRequest): Promise<Run> =>
+  normalizeRun(await apiFetch<any>(`${BASE_URL}/runs`, {
     method: 'POST',
     body: JSON.stringify(request),
-  });
-  return normalizeRun(raw);
-};
+  }));
 
 /**
  * PATCH /runs/{runId}
- * Update metadata and dynamic strategy parameters before starting a run.
- * The request payload strictly sends name, description, and strategy_params.
+ * Flat payload — no nested graph_config wrapper.
+ * Call this BEFORE startAutomaticRun to sync strategy/node params.
+ * Backend ignores unknown fields safely.
  */
-export const updateRun = async (runId: string, request: UpdateRunRequest): Promise<Run> => {
-  const raw = await apiFetch<any>(`${BASE_URL}/runs/${runId}`, {
+export const updateRun = async (runId: string, request: UpdateRunRequest): Promise<Run> =>
+  normalizeRun(await apiFetch<any>(`${BASE_URL}/runs/${runId}`, {
     method: 'PATCH',
     body: JSON.stringify(request),
-  });
-  return normalizeRun(raw);
-};
+  }));
 
 /** DELETE /runs/{runId} */
 export const deleteRun = (runId: string): Promise<void> =>
@@ -135,7 +119,7 @@ export const deleteRun = (runId: string): Promise<void> =>
 
 /**
  * POST /runs/{runId}/start
- * Starts an AUTOMATIC run. Call updateRun (PATCH) first to sync UI config.
+ * Starts the automatic run. Always call updateRun (PATCH) first to sync params.
  */
 export const startAutomaticRun = async (
   runId: string,
@@ -151,13 +135,12 @@ export const stopRun = (runId: string): Promise<void> =>
   apiFetch<void>(`${BASE_URL}/runs/${runId}/stop`, { method: 'POST' });
 
 // =============================================================================
-// MANUAL EXECUTION (Human-in-the-Loop)
+// MANUAL EXECUTION
 // =============================================================================
 
 /**
  * POST /runs/{runId}/sessions
- * Creates a new chat session. Returns session_id.
- * After calling: emit join_session_room({ session_id }) over WebSocket.
+ * Creates a chat session. After this, call websocketService.joinSessionRoom(session_id).
  */
 export const createManualSession = async (
   runId: string,
@@ -170,10 +153,9 @@ export const createManualSession = async (
 
 /**
  * POST /runs/{runId}/sessions/{sessionId}/manual_turn
- * Submits one user prompt. Disable input after calling; re-enable on run_idle WS event.
- *
- * ⚠ DO NOT render attack.prompt as the user bubble.
- *    Use attack.metadata.user_input instead.
+ * One turn: Attack → Defense → Eval.
+ * Disable input box after calling; re-enable ONLY on run_idle WS event.
+ * ⚠ Render user bubble from turn.metadata.user_input — NOT turn.content.
  */
 export const submitManualTurn = async (
   runId: string,
@@ -182,15 +164,12 @@ export const submitManualTurn = async (
 ): Promise<SubmitManualTurnResponse> =>
   apiFetch<SubmitManualTurnResponse>(
     `${BASE_URL}/runs/${runId}/sessions/${sessionId}/manual_turn`,
-    {
-      method: 'POST',
-      body: JSON.stringify(request),
-    }
+    { method: 'POST', body: JSON.stringify(request) }
   );
 
 /**
  * GET /runs/{runId}/sessions/{sessionId}/history
- * Render user bubbles from turn.metadata.user_input — NOT turn.content.
+ * ⚠ Render user bubbles from turn.metadata.user_input — NOT turn.content.
  */
 export const getManualSessionHistory = async (
   runId: string,
@@ -217,7 +196,7 @@ export const fetchManualSessions = async (runId: string): Promise<ManualSessionR
 // DISCOVERY
 // =============================================================================
 
-/** GET /strategies — fetch all strategies + schemas for dynamic form building */
+/** GET /strategies — all strategies + schemas for dynamic form building */
 export const getStrategies = async (): Promise<StrategySchema[]> => {
   const data = await apiFetch<any>(`${BASE_URL}/strategies`);
   return Array.isArray(data) ? data : data?.strategies ?? [];
@@ -233,7 +212,11 @@ export const getProviders = async (): Promise<Provider[]> => {
   return Array.isArray(data) ? data : data?.providers ?? [];
 };
 
-/** GET /nodes/{type} — 'attack' | 'defense' | 'evaluation' */
+/**
+ * GET /nodes/{type}
+ * Returns node schemas with dynamic param definitions for RunConfigPanel.
+ * type: 'attack' | 'defense' | 'evaluation'
+ */
 export const getNodes = async (
   nodeType: 'attack' | 'defense' | 'evaluation'
 ): Promise<NodeSchema[]> => {
@@ -242,7 +225,7 @@ export const getNodes = async (
 };
 
 // =============================================================================
-// LEGACY manual API (api_manual.ts compatibility) — for existing ManualAttackPage
+// LEGACY COMPAT (api_manual.ts shims — used by ManualAttackPage)
 // =============================================================================
 
 export const fetchManualConfig = (runId: string) =>
@@ -250,34 +233,21 @@ export const fetchManualConfig = (runId: string) =>
 
 export const updateManualConfig = (runId: string, config: any) =>
   apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/config`, {
-    method: 'PUT',
-    body: JSON.stringify(config),
-  });
-
-export const addTurn = (runId: string, sessionId: string, body: any) =>
-  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}/turns`, {
-    method: 'POST',
-    body: JSON.stringify(body),
+    method: 'PUT', body: JSON.stringify(config),
   });
 
 export const saveSession = (runId: string, sessionId: string, body?: any) =>
   apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}/save`, {
-    method: 'POST',
-    body: JSON.stringify(body ?? {}),
+    method: 'POST', body: JSON.stringify(body ?? {}),
   });
 
 export const fetchManualStats = (runId: string) =>
   apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/stats`);
 
 export const deleteManualSession = (runId: string, sessionId: string) =>
-  apiFetch<void>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}`, {
-    method: 'DELETE',
-  });
+  apiFetch<void>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}`, { method: 'DELETE' });
 
-export const fetchManualSession = (runId: string | null, sessionId: string) =>
-  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}`);
-
-// Resolves run start mode from graph config
+// Resolves start mode from RunConfig
 export type RunStartMode = 'automatic' | 'manual';
-export const resolveRunStartMode = (graphConfig: GraphConfig): RunStartMode =>
-  graphConfig.graph_type === 'manual' ? 'manual' : 'automatic';
+export const resolveRunStartMode = (config: RunConfig): RunStartMode =>
+  config.graph_type === 'manual' ? 'manual' : 'automatic';

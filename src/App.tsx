@@ -1,25 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import HomePage from './pages/homepage';
+import HomePage from './pages/HomePage';
 import DashboardPage from './pages/DashboardPage';
-import AttackTestingPage from './pages/AttackTestingPage';
-import DefenseTestingPage from './pages/DefenseTestingPage';
-import ManualAttackPage from './pages/ManualAttackPage';
+import RunShell from './pages/RunShell';
 import { Run } from './types';
 import { useAppStore } from './store/appStore';
 import { websocketService } from './services/websocket';
 import { fetchRuns } from './services/api';
 
-type AppPage = 'home' | 'dashboard' | 'attack' | 'defense' | 'manual';
+type AppPage = 'home' | 'dashboard' | 'run';
 
 const App: React.FC = () => {
-  const [page, setPage] = useState<AppPage>('home');
+  const [page, setPage] = useState<AppPage>(() => {
+    // Restore page from sessionStorage so refresh doesn't boot to home
+    const saved = sessionStorage.getItem('fp_page') as AppPage | null;
+    return saved ?? 'home';
+  });
 
-  const setRuns      = useAppStore(s => s.setRuns);
-  const setActiveRun = useAppStore(s => s.setActiveRun);
+  const setRuns       = useAppStore(s => s.setRuns);
+  const setActiveRun  = useAppStore(s => s.setActiveRun);
   const resetRunState = useAppStore(s => s.resetRunState);
 
   useEffect(() => {
-    const socketUrl = process.env.REACT_APP_SOCKET_URL ?? 'http://localhost:3001';
+    const socketUrl = process.env.REACT_APP_SOCKET_URL ?? 'http://localhost:8000';
     websocketService.connect(socketUrl);
 
     const initRuns = async () => {
@@ -36,36 +38,25 @@ const App: React.FC = () => {
     return () => { websocketService.disconnect(); };
   }, [setRuns]);
 
+  // Persist page to sessionStorage
+  const navigate = (p: AppPage) => {
+    sessionStorage.setItem('fp_page', p);
+    setPage(p);
+  };
+
   const handleOpenRun = (run: Run) => {
     setActiveRun(run.runid);
     resetRunState();
-
-    const isManual = run.components.includes('manual');
-    const graphType = run.graph_config?.graph_type;
-
-    if (isManual || graphType === 'manual') {
-      setPage('manual');
-    } else if (run.components.includes('attack') && run.components.includes('defense')) {
-      // Show attack page by default for full pipeline runs
-      setPage('attack');
-    } else if (run.components.includes('attack')) {
-      setPage('attack');
-    } else if (run.components.includes('defense')) {
-      setPage('defense');
-    } else {
-      setPage('attack');
-    }
+    navigate('run');
   };
 
-  const handleBackToHome      = () => { setActiveRun(null); setPage('home'); };
-  const handleBackToDashboard = () => { setActiveRun(null); setPage('dashboard'); };
+  const handleBackToHome      = () => { setActiveRun(null); navigate('home'); };
+  const handleBackToDashboard = () => { setActiveRun(null); navigate('dashboard'); };
 
   if (page === 'dashboard') return <DashboardPage onOpenRun={handleOpenRun} onBack={handleBackToHome} />;
-  if (page === 'attack')    return <AttackTestingPage onBack={handleBackToDashboard} />;
-  if (page === 'defense')   return <DefenseTestingPage onBack={handleBackToDashboard} />;
-  if (page === 'manual')    return <ManualAttackPage onBack={handleBackToDashboard} />;
+  if (page === 'run')       return <RunShell onBack={handleBackToDashboard} />;
 
-  return <HomePage onNavigate={nextPage => setPage(nextPage)} />;
+  return <HomePage onNavigate={() => navigate('dashboard')} />;
 };
 
 export default App;
