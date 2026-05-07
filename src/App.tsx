@@ -1,24 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import DashboardPage from './pages/DashboardPage';
 import RunShell from './pages/RunShell';
-import { Run } from './types';
 import { useAppStore } from './store/appStore';
 import { websocketService } from './services/websocket';
 import { fetchRuns } from './services/api';
 
-type AppPage = 'home' | 'dashboard' | 'run';
-
-const App: React.FC = () => {
-  const [page, setPage] = useState<AppPage>(() => {
-    // Restore page from sessionStorage so refresh doesn't boot to home
-    const saved = sessionStorage.getItem('fp_page') as AppPage | null;
-    return saved ?? 'home';
-  });
-
-  const setRuns       = useAppStore(s => s.setRuns);
-  const setActiveRun  = useAppStore(s => s.setActiveRun);
-  const resetRunState = useAppStore(s => s.resetRunState);
+const AppInner: React.FC = () => {
+  const setRuns = useAppStore(s => s.setRuns);
 
   useEffect(() => {
     const socketUrl = process.env.REACT_APP_SOCKET_URL ?? 'http://localhost:8000';
@@ -38,25 +28,29 @@ const App: React.FC = () => {
     return () => { websocketService.disconnect(); };
   }, [setRuns]);
 
-  // Persist page to sessionStorage
-  const navigate = (p: AppPage) => {
-    sessionStorage.setItem('fp_page', p);
-    setPage(p);
-  };
-
-  const handleOpenRun = (run: Run) => {
-    setActiveRun(run.runid);
-    resetRunState();
-    navigate('run');
-  };
-
-  const handleBackToHome      = () => { setActiveRun(null); navigate('home'); };
-  const handleBackToDashboard = () => { setActiveRun(null); navigate('dashboard'); };
-
-  if (page === 'dashboard') return <DashboardPage onOpenRun={handleOpenRun} onBack={handleBackToHome} />;
-  if (page === 'run')       return <RunShell onBack={handleBackToDashboard} />;
-
-  return <HomePage onNavigate={() => navigate('dashboard')} />;
+  return (
+    <Routes>
+      <Route path="/"                 element={<HomePage />} />
+      <Route path="/dashboard"        element={<DashboardPage />} />
+      <Route path="/runs/:runId/:tab" element={<RunShell />} />
+      {/* Redirect bare /runs/:runId → attack tab */}
+      <Route path="/runs/:runId"      element={<RunShellRedirect />} />
+      <Route path="*"                 element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 };
+
+// Redirect /runs/:runId → /runs/:runId/attack
+const RunShellRedirect: React.FC = () => {
+  const params = window.location.pathname.split('/');
+  const runId  = params[2] ?? '';
+  return <Navigate to={`/runs/${runId}/attack`} replace />;
+};
+
+const App: React.FC = () => (
+  <BrowserRouter>
+    <AppInner />
+  </BrowserRouter>
+);
 
 export default App;

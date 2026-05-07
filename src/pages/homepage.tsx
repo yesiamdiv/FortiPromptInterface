@@ -1,10 +1,8 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
-interface HomePageProps {
-  onNavigate: (page: 'dashboard') => void;
-}
-
-const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
+const HomePage: React.FC = () => {
+  const navigate = useNavigate();
   return (
     <div className="home-page">
       <style>{`
@@ -277,7 +275,7 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
       {/* CTA */}
       <div className="fp-cta-section">
-        <button className="fp-cta-btn" onClick={() => onNavigate('dashboard')}>
+        <button className="fp-cta-btn" onClick={() => navigate('/dashboard')}>
           Go to Dashboard
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M4 8H12M12 8L8 4M12 8L8 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

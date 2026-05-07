@@ -5,7 +5,6 @@ import { startAutomaticRun, stopRun } from '../services/api';
 import { websocketService } from '../services/websocket';
 
 interface AttackTestingPageProps {
-  onBack: () => void;
   embedded?: boolean;
 }
 
@@ -17,7 +16,7 @@ const STATUS_CFG: Record<AttackStatus, { label: string; bg: string; color: strin
   blocked:   { label: 'Blocked',   bg: '#F0FDF4', color: '#15803D', dot: '#22C55E' },
 };
 
-const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack, embedded = false }) => {
+const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false }) => {
   const activeRunId   = useAppStore(s => s.activeRunId);
   const attackPrompts = useAppStore(s => s.attackPrompts);
   const attackStats   = useAppStore(s => s.attackStats);
@@ -259,17 +258,8 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ onBack, embedded 
     </div>
   );
 
-  if (embedded) return body;
-
-  return (
-    <div style={{ fontFamily: "'DM Sans',sans-serif", background: '#F7F6F3', minHeight: '100vh' }}>
-      <nav style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '0 24px', height: 52, background: '#fff', borderBottom: '1px solid #E8E6E0', position: 'sticky', top: 0, zIndex: 10 }}>
-        <button onClick={onBack} style={{ fontSize: 13, color: '#888', cursor: 'pointer', border: 'none', background: 'none', fontFamily: 'inherit' }}>← Back</button>
-        <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-.3px' }}>Attack Testing</span>
-      </nav>
-      <div style={{ maxWidth: 960, margin: '0 auto' }}>{body}</div>
-    </div>
-  );
+  // Always embedded via RunShell — standalone not needed
+  return body;
 };
 
 const CARD: React.CSSProperties    = { background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, overflow: 'hidden' };

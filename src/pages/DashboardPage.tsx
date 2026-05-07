@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus, Play, Pause, Trash2, Edit, AlertCircle, MessageSquare,
   Zap, Shield, Settings, ChevronRight, Loader, RefreshCw, Layers, SlidersHorizontal,
@@ -13,11 +14,6 @@ import { websocketService } from '../services/websocket';
 
 type RunMode  = 'automatic' | 'manual';
 type WizardStep = 'type' | 'config' | 'review';
-
-interface DashboardPageProps {
-  onOpenRun: (run: Run) => void;
-  onBack:    () => void;
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,7 +79,8 @@ const TEMPLATES = [
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
+const DashboardPage: React.FC = () => {
+  const navigate = useNavigate();
   const [showCreate,    setShowCreate]    = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [loading,       setLoading]       = useState(true);
@@ -246,7 +243,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
         }
       }
 
-      onOpenRun(created);
+      const defaultTab = created.config?.graph_type === 'manual' ? 'manual' : 'attack';
+      navigate(`/runs/${created.runid}/${defaultTab}`);
       resetModal();
 
     } catch (err) {
@@ -456,7 +454,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
       {/* NAV */}
       <nav className="db-nav">
         <div className="db-nav-left">
-          <button className="db-back" onClick={onBack}>← Home</button>
+          <button className="db-back" onClick={() => navigate('/')}>← Home</button>
           <div className="db-sep" />
           <span className="db-logo">FortiPrompt</span>
           <span className="db-badge">DASHBOARD</span>
@@ -587,7 +585,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
                   <div className="db-run-ft">
                     <button
                       className={`db-open-btn ${isManual ? 'manual' : ''}`}
-                      onClick={() => { setActiveRun(run.runid); resetRunState(); onOpenRun(run); }}
+                      onClick={() => { setActiveRun(run.runid); resetRunState(); navigate(`/runs/${run.runid}/attack`); }}
                     >
                       {isManual ? <MessageSquare size={13}/> : <Play size={13}/>}
                       Open Run
@@ -790,4 +788,3 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenRun, onBack }) => {
 };
 
 export default DashboardPage;
-
