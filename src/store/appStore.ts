@@ -1,4 +1,4 @@
-import { Zap, Shield, MessageSquare } from 'lucide-react';
+import { Zap, Shield, MessageSquare, BarChart2 } from 'lucide-react';
 import { create } from 'zustand';
 import {
   Run,
@@ -6,6 +6,8 @@ import {
   AttackStats,
   DefenseResponse,
   DefenseStats,
+  EvalResult,
+  EvalStats,
   ComponentType,
   ComponentLabel,
   RunProgress,
@@ -21,28 +23,31 @@ export const componentLabels: Record<ComponentType, ComponentLabel> = {
   manual:  { name: 'Manual Attack',   icon: MessageSquare, color: '#6366F1' },
 };
 
-// ─── Discovery state (loaded once per run, shared by RunConfigPanel) ───────────
+// ─── Discovery cache ──────────────────────────────────────────────────────────
 
 export interface RunDiscovery {
-  attackNodes:     NodeSchema[];
-  defenseNodes:    NodeSchema[];
-  evalNodes:       NodeSchema[];
-  strategies:      StrategySchema[];
-  loadedForRunId:  string | null;
-  loading:         boolean;
+  attackNodes:    NodeSchema[];
+  defenseNodes:   NodeSchema[];
+  evalNodes:      NodeSchema[];
+  strategies:     StrategySchema[];
+  loadedForRunId: string | null;
+  loading:        boolean;
 }
 
-// ─── Store shape ───────────────────────────────────────────────────────────────
+// ─── Store shape ──────────────────────────────────────────────────────────────
 
 interface AppState {
   // Runs
   runs:        Run[];
   activeRunId: string | null;
 
+  /** True while a run is executing — locks the config panel */
+  isRunLocked: boolean;
+
   // Progress (automatic run)
   runProgress: RunProgress | null;
 
-  // Discovery cache — shared across pages via RunConfigPanel
+  // Discovery cache
   runDiscovery: RunDiscovery;
 
   // Attack
@@ -57,20 +62,25 @@ interface AppState {
   isEvaluating:     boolean;
   defenseError:     string | null;
 
+  // Evaluation
+  evalResults: EvalResult[];
+  evalStats:   EvalStats | null;
+
   // Connection
   connectionStatus: 'idle' | 'testing' | 'connected' | 'failed';
 
-  // ── Run actions ──────────────────────────────────────────────────────────────
+  // ── Run actions ───────────────────────────────────────────────────────────────
   setRuns:      (runs: Run[]) => void;
   addRun:       (run: Run)    => void;
   updateRun:    (id: string, patch: Partial<Run>) => void;
   deleteRun:    (id: string)  => void;
   setActiveRun: (id: string | null) => void;
+  setIsRunLocked: (v: boolean) => void;
 
-  // ── Progress ─────────────────────────────────────────────────────────────────
+  // ── Progress ──────────────────────────────────────────────────────────────────
   setRunProgress: (p: RunProgress | null) => void;
 
-  // ── Discovery ────────────────────────────────────────────────────────────────
+  // ── Discovery ─────────────────────────────────────────────────────────────────
   setRunDiscovery: (d: Partial<RunDiscovery>) => void;
 
   // ── Attack actions ────────────────────────────────────────────────────────────
@@ -89,10 +99,16 @@ interface AppState {
   setIsEvaluating:       (v: boolean)                    => void;
   setDefenseError:       (msg: string | null)            => void;
 
+  // ── Evaluation actions ────────────────────────────────────────────────────────
+  addEvalResult:     (result: EvalResult) => void;
+  setEvalResults:    (results: EvalResult[]) => void;
+  clearEvalResults:  ()                      => void;
+  setEvalStats:      (stats: EvalStats)      => void;
+
   // ── Connection ────────────────────────────────────────────────────────────────
   setConnectionStatus: (s: 'idle' | 'testing' | 'connected' | 'failed') => void;
 
-  // ── Reset per-run transient state ─────────────────────────────────────────────
+  // ── Reset per-run state ───────────────────────────────────────────────────────
   resetRunState: () => void;
 }
 
@@ -108,6 +124,7 @@ const defaultDiscovery: RunDiscovery = {
 export const useAppStore = create<AppState>((set) => ({
   runs:        [],
   activeRunId: null,
+  isRunLocked: false,
   runProgress: null,
   runDiscovery: defaultDiscovery,
 
@@ -121,6 +138,9 @@ export const useAppStore = create<AppState>((set) => ({
   isEvaluating:     false,
   defenseError:     null,
 
+  evalResults: [],
+  evalStats:   null,
+
   connectionStatus: 'idle',
 
   // Runs
@@ -128,8 +148,9 @@ export const useAppStore = create<AppState>((set) => ({
   addRun:    (run)   => set(s => ({ runs: [...s.runs, run] })),
   updateRun: (id, patch) =>
     set(s => ({ runs: s.runs.map(r => r.runid === id ? { ...r, ...patch } : r) })),
-  deleteRun: (id)    => set(s => ({ runs: s.runs.filter(r => r.runid !== id) })),
+  deleteRun: (id) => set(s => ({ runs: s.runs.filter(r => r.runid !== id) })),
   setActiveRun: (activeRunId) => set({ activeRunId }),
+  setIsRunLocked: (isRunLocked) => set({ isRunLocked }),
 
   // Progress
   setRunProgress: (runProgress) => set({ runProgress }),
@@ -156,11 +177,21 @@ export const useAppStore = create<AppState>((set) => ({
   setIsEvaluating:       (isEvaluating)     => set({ isEvaluating }),
   setDefenseError:       (defenseError)     => set({ defenseError }),
 
+  // Evaluation
+  addEvalResult: (result) => set(s => {
+    if (s.evalResults.some(r => r.evalId === result.evalId)) return s;
+    return { evalResults: [...s.evalResults, result] };
+  }),
+  setEvalResults:   (evalResults) => set({ evalResults }),
+  clearEvalResults: ()            => set({ evalResults: [] }),
+  setEvalStats:     (evalStats)   => set({ evalStats }),
+
   // Connection
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
 
-  // Reset transient run state (call when switching runs)
+  // Reset
   resetRunState: () => set({
+    isRunLocked:      false,
     runProgress:      null,
     runDiscovery:     defaultDiscovery,
     attackPrompts:    [],
@@ -171,6 +202,8 @@ export const useAppStore = create<AppState>((set) => ({
     defenseStats:     null,
     isEvaluating:     false,
     defenseError:     null,
+    evalResults:      [],
+    evalStats:        null,
     connectionStatus: 'idle',
   }),
 }));

@@ -1,54 +1,39 @@
 // services/websocket.ts
-// ─── WebSocket (Socket.IO) Service ───────────────────────────────────────────
-//
 // Room model:
-//   Automatic runs → join run_id room; listen for attack_generated, run_completed, etc.
-//   Manual runs    → join session_id room; listen for manual_* events + run_idle.
+//   Automatic runs → join run_id room
+//   Manual runs    → join session_id room after createManualSession()
 //
-// The input box MUST remain disabled until run_idle fires for the current session.
+// isRunLocked is set true on run_started and false on run_completed/run_error/run_idle
 
 import { io, Socket } from 'socket.io-client';
 import { useAppStore } from '../store/appStore';
 import { useManualStore } from '../store/manualStore';
 
 import {
-  WSNewRunAvailable,
-  WSRunStarted,
-  WSRunProgress,
-  WSRunCompleted,
-  WSRunError,
-  WSAttackGenerated,
-  WSDefenseResponseGenerated,
+  WSNewRunAvailable, WSRunStarted, WSRunProgress, WSRunCompleted,
+  WSRunError, WSAttackGenerated, WSDefenseResponseGenerated,
+  WSEvalResult, WSEvalStats, WSDefenseStats, WSAttackStats,
+  EvalResult,
 } from '../types';
 
 import {
-  WSManualSessionCreated,
-  WSManualAttackGenerated,
-  WSManualDefenseResponse,
-  WSManualEvaluationComplete,
-  WSManualTurnCompleted,
-  WSRunIdle,
+  WSManualSessionCreated, WSManualAttackGenerated,
+  WSManualDefenseResponse, WSManualEvaluationComplete,
+  WSManualTurnCompleted, WSRunIdle,
 } from '../types/manual';
 
 class WebSocketService {
   private socket: Socket | null = null;
   private _connected = false;
 
-  // ─── Connect ───────────────────────────────────────────────────────────────
-
   connect(url: string, authToken?: string): void {
-    if (this.socket?.connected) {
-      console.warn('[WS] Already connected');
-      return;
-    }
-
+    if (this.socket?.connected) return;
     this.socket = io(url, {
       auth: authToken ? { token: authToken } : undefined,
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
     });
-
     this.setupEventListeners();
   }
 
@@ -56,61 +41,38 @@ class WebSocketService {
     this.socket?.disconnect();
     this.socket = null;
     this._connected = false;
-    console.log('[WS] Disconnected');
   }
-
-  // ─── Rooms ─────────────────────────────────────────────────────────────────
 
   joinRun(runId: string): void {
     this.socket?.emit('join_run_channel', { runId });
-    console.log('[WS] Joined run room:', runId);
   }
-
   leaveRun(runId: string): void {
     this.socket?.emit('leave_run_channel', { runId });
   }
 
-  /** Must be called after createManualSession() to receive manual_* events. */
+  /** Call immediately after createManualSession() */
   joinSessionRoom(sessionId: string): void {
     this.socket?.emit('join_session_room', { session_id: sessionId });
-    console.log('[WS] Joined session room:', sessionId);
   }
-
   leaveSessionRoom(sessionId: string): void {
     this.socket?.emit('leave_session_room', { session_id: sessionId });
   }
 
-  // ─── Event Listeners ───────────────────────────────────────────────────────
-
   private setupEventListeners(): void {
     if (!this.socket) return;
 
-    // Connection lifecycle
-    this.socket.on('connect', () => {
-      this._connected = true;
-      console.log('[WS] Connected');
-    });
-
-    this.socket.on('disconnect', (reason) => {
-      this._connected = false;
-      console.log('[WS] Disconnected:', reason);
-    });
-
-    this.socket.on('connect_error', (err) => {
-      console.error('[WS] Error:', err);
-    });
+    this.socket.on('connect', () => { this._connected = true; });
+    this.socket.on('disconnect', () => { this._connected = false; });
+    this.socket.on('connect_error', (err) => { console.error('[WS]', err); });
 
     this.setupGlobalEvents();
     this.setupAutomaticRunEvents();
     this.setupManualRunEvents();
   }
 
-  // ─── Global events (all clients) ───────────────────────────────────────────
-
   private setupGlobalEvents(): void {
     this.socket!.on('new_run_available', (data: WSNewRunAvailable) => {
       const { addRun } = useAppStore.getState();
-      console.log('[WS] new_run_available:', data);
       addRun({
         runid:       data.run_id,
         name:        data.run_summary.name,
@@ -123,89 +85,104 @@ class WebSocketService {
     });
   }
 
-  // ─── Automatic run events (run_id room) ────────────────────────────────────
-
   private setupAutomaticRunEvents(): void {
     const s = this.socket!;
 
+    // ── Run lifecycle ─────────────────────────────────────────────────────────
+
     s.on('run_started', (data: WSRunStarted) => {
-      const { updateRun, activeRunId } = useAppStore.getState();
-      if (activeRunId === data.run_id) {
-        updateRun(data.run_id, { status: 'running' });
-      }
+      const { updateRun, setIsRunLocked, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.run_id) return;
+      updateRun(data.run_id, { status: 'running' });
+      setIsRunLocked(true);   // Lock config panel once run begins
     });
 
     s.on('run_progress', (data: WSRunProgress) => {
       const { setRunProgress, activeRunId } = useAppStore.getState();
-      if (activeRunId === data.run_id) {
-        setRunProgress({
-          current:          data.current,
-          total:            data.total,
-          message:          data.message,
-          progress_percent: data.progress_percent,
-        });
-      }
-    });
-
-    s.on('attack_generated', (data: WSAttackGenerated) => {
-      const { addAttackPrompt, activeRunId } = useAppStore.getState();
-      if (activeRunId === data.runId) {
-        addAttackPrompt(data.prompt);
-      }
-    });
-
-    s.on('defense_response_generated', (data: WSDefenseResponseGenerated) => {
-      const { addDefenseResponse, activeRunId } = useAppStore.getState();
-      if (activeRunId === data.runId) {
-        addDefenseResponse(data.response);
-      }
+      if (activeRunId !== data.run_id) return;
+      setRunProgress({ current: data.current, total: data.total, message: data.message, progress_percent: data.progress_percent });
     });
 
     s.on('run_completed', (data: WSRunCompleted) => {
-      const { updateRun, setIsAttacking, setRunProgress, activeRunId } = useAppStore.getState();
-      if (activeRunId === data.run_id) {
-        updateRun(data.run_id, { status: 'completed', updatedAt: new Date().toISOString() });
-        setIsAttacking(false);
-        setRunProgress(null);
-      }
+      const { updateRun, setIsAttacking, setIsEvaluating, setIsRunLocked, setRunProgress, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.run_id) return;
+      updateRun(data.run_id, { status: 'completed', updatedAt: new Date().toISOString() });
+      setIsAttacking(false);
+      setIsEvaluating(false);
+      setIsRunLocked(false);  // Unlock config panel
+      setRunProgress(null);
     });
 
     s.on('run_error', (data: WSRunError) => {
-      const { updateRun, setIsAttacking, setAttackError, activeRunId } = useAppStore.getState();
-      console.error('[WS] run_error:', data);
-      if (activeRunId === data.run_id) {
-        updateRun(data.run_id, { status: 'failed', updatedAt: new Date().toISOString() });
-        setIsAttacking(false);
-        setAttackError(data.error);
-      }
+      const { updateRun, setIsAttacking, setIsEvaluating, setIsRunLocked, setAttackError, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.run_id) return;
+      updateRun(data.run_id, { status: 'failed', updatedAt: new Date().toISOString() });
+      setIsAttacking(false);
+      setIsEvaluating(false);
+      setIsRunLocked(false);
+      setAttackError(data.error);
+    });
+
+    // ── Attack node ────────────────────────────────────────────────────────────
+
+    s.on('attack_generated', (data: WSAttackGenerated) => {
+      const { addAttackPrompt, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.runId) return;
+      addAttackPrompt(data.prompt);
+    });
+
+    s.on('attack_stats_updated', (data: WSAttackStats) => {
+      const { setAttackStats, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.runId) return;
+      setAttackStats(data.stats);
+    });
+
+    // ── Defense node ───────────────────────────────────────────────────────────
+
+    s.on('defense_response_generated', (data: WSDefenseResponseGenerated) => {
+      const { addDefenseResponse, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.runId) return;
+      addDefenseResponse(data.response);
+    });
+
+    s.on('defense_stats_updated', (data: WSDefenseStats) => {
+      const { setDefenseStats, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.runId) return;
+      setDefenseStats(data.stats);
+    });
+
+    // ── Evaluation node ────────────────────────────────────────────────────────
+    // Suggested new backend events — see API_DOCS.md for implementation spec.
+
+    s.on('evaluation_result', (data: WSEvalResult) => {
+      const { addEvalResult, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.runId) return;
+      addEvalResult(data.result);
+    });
+
+    s.on('evaluation_stats_updated', (data: WSEvalStats) => {
+      const { setEvalStats, activeRunId } = useAppStore.getState();
+      if (activeRunId !== data.runId) return;
+      setEvalStats(data.stats);
     });
   }
-
-  // ─── Manual run events (session_id room) ───────────────────────────────────
 
   private setupManualRunEvents(): void {
     const s = this.socket!;
 
     s.on('manual_session_created', (data: WSManualSessionCreated) => {
       const { addSession } = useManualStore.getState();
-      console.log('[WS] manual_session_created:', data);
       addSession(data.session);
     });
 
     /**
-     * manual_attack_generated — the AI's attack turn is ready.
-     * Render user bubble from attack.metadata.user_input, NOT attack.prompt.
+     * manual_attack_generated — user's prompt has been echoed back.
+     * Render from attack.metadata.user_input — NOT attack.prompt (that's full LLM context).
      */
     s.on('manual_attack_generated', (data: WSManualAttackGenerated) => {
       const { appendTurnToActiveSession, activeSession } = useManualStore.getState();
       if (activeSession?.session_id !== data.session_id) return;
-
-      // Use metadata.user_input for the clean user-facing text
-      const userText = data.attack.metadata?.user_input
-        ?? data.attack.preview
-        ?? data.attack.full_text
-        ?? '(attack)';
-
+      const userText = data.attack.metadata?.user_input ?? data.attack.preview ?? '(attack)';
       appendTurnToActiveSession({
         turn_id:   data.turn_id,
         role:      'attacker',
@@ -215,38 +192,28 @@ class WebSocketService {
       });
     });
 
-    /**
-     * manual_defence_response — the defense system replied.
-     */
+    /** manual_defence_response — defense system replied */
     s.on('manual_defence_response', (data: WSManualDefenseResponse) => {
       const { appendTurnToActiveSession, activeSession } = useManualStore.getState();
       if (activeSession?.session_id !== data.session_id) return;
-
-      const text = data.defence.full_text ?? data.defence.response ?? '(defense response)';
-
+      const text       = data.defence.full_text ?? data.defence.response ?? '(defense response)';
+      const wasBlocked = !!data.defence.was_blocked;
       appendTurnToActiveSession({
         turn_id:   data.turn_id,
         role:      'defense',
         content:   text,
         timestamp: new Date().toISOString(),
-        metadata:  {
-          was_blocked: data.defence.was_blocked,
-          ...data.defence.metadata,
-        },
+        metadata:  { was_blocked: wasBlocked, blocked_by: (data.defence as any).blocked_by, attack_type: (data.defence as any).attack_type, ...data.defence.metadata },
       });
     });
 
-    /**
-     * manual_evaluation_complete — append evaluation result as a turn.
-     */
+    /** manual_evaluation_complete — eval node result for this turn */
     s.on('manual_evaluation_complete', (data: WSManualEvaluationComplete) => {
       const { appendTurnToActiveSession, activeSession } = useManualStore.getState();
       if (activeSession?.session_id !== data.session_id) return;
-
+      const label   = data.evaluation.label ?? (data.evaluation.success ? 'breached' : 'blocked');
+      const score   = data.evaluation.score;
       const reasoning = data.evaluation.reasoning ?? '';
-      const label     = data.evaluation.label ?? (data.evaluation.success ? 'breached' : 'blocked');
-      const score     = data.evaluation.score;
-
       appendTurnToActiveSession({
         turn_id:   `eval-${data.turn_id}`,
         role:      'evaluation',
@@ -256,35 +223,24 @@ class WebSocketService {
       });
     });
 
-    /**
-     * manual_turn_completed — internal signal; run_idle will follow shortly.
-     */
-    s.on('manual_turn_completed', (data: WSManualTurnCompleted) => {
-      console.log('[WS] manual_turn_completed, waiting for run_idle', data);
+    s.on('manual_turn_completed', (_data: WSManualTurnCompleted) => {
+      // run_idle follows — that's what re-enables input
     });
 
     /**
-     * run_idle — THE signal to re-enable the chat input box.
-     * Also update the active session's last_turn_id in the store if needed.
+     * run_idle — re-enable the chat input box.
+     * This fires after every manual turn cycle completes.
      */
     s.on('run_idle', (data: WSRunIdle) => {
       const { setIsWaitingForResponse, activeSession } = useManualStore.getState();
-      console.log('[WS] run_idle:', data);
       if (activeSession?.session_id === data.session_id) {
         setIsWaitingForResponse(false);
       }
     });
   }
 
-  // ─── Utils ─────────────────────────────────────────────────────────────────
-
-  isConnected(): boolean {
-    return this._connected && this.socket?.connected === true;
-  }
-
-  getSocket(): Socket | null {
-    return this.socket;
-  }
+  isConnected(): boolean { return this._connected && this.socket?.connected === true; }
+  getSocket(): Socket | null { return this.socket; }
 }
 
 export const websocketService = new WebSocketService();

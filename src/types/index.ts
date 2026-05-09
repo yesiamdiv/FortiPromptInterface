@@ -14,31 +14,15 @@ export interface ComponentLabel {
 
 // ─── Node configs ──────────────────────────────────────────────────────────────
 
-export interface AttackNodeConfig {
-  node_type?: string;
-  [key: string]: any;
-}
-
-export interface DefenseNodeConfig {
-  node_type?: string;
-  [key: string]: any;
-}
-
-export interface EvaluationNodeConfig {
-  node_type?: string;
-  [key: string]: any;
-}
+export interface AttackNodeConfig   { node_type?: string; [key: string]: any; }
+export interface DefenseNodeConfig  { node_type?: string; [key: string]: any; }
+export interface EvaluationNodeConfig { node_type?: string; [key: string]: any; }
 
 export interface StrategyConfig {
   strategy_name?: string;
   strategy_params?: Record<string, any>;
 }
 
-/**
- * RunConfig replaces GraphConfig.
- * Used in CreateRunRequest.config and reflected in Run.config.
- * All sub-fields optional — backend ignores unknown extras.
- */
 export interface RunConfig {
   graph_type: 'automatic' | 'manual';
   attack_node_config?: AttackNodeConfig;
@@ -89,10 +73,6 @@ export interface CreateRunRequest {
   payload?: Record<string, any>;
 }
 
-/**
- * PATCH /runs/{runId} — flattened, no nested graph_config.
- * Backend ignores unknown fields so extra context is safe to send.
- */
 export interface UpdateRunRequest {
   name?: string;
   description?: string;
@@ -141,7 +121,7 @@ export interface AttackStats {
   attacksGenerated: number;
 }
 
-// ─── Defense ─────────────────────────────────────────────────────────────────────
+// ─── Defense ──────────────────────────────────────────────────────────────────
 
 export type DefenseEvaluation = 'blocked' | 'passed' | 'failed_filter';
 
@@ -155,10 +135,20 @@ export interface DefenseConfig {
   model: string;
 }
 
+/**
+ * A single response from the defense node.
+ * was_blocked: true  → defense system intercepted the prompt before it reached the LLM
+ * was_blocked: false → LLM replied; defenseResponse is the LLM reply
+ * blocked_by:        → which filter layer caught it (e.g. 'regex_filter', 'llm_judge')
+ * attack_type:       → detected attack category if identified (e.g. 'prompt_injection')
+ */
 export interface DefenseResponse {
   promptId: string;
-  defenseResponse: string;
+  defenseResponse: string;    // LLM reply text OR block message
   evaluation: DefenseEvaluation;
+  was_blocked: boolean;
+  blocked_by?: string;        // which filter layer caught it
+  attack_type?: string;       // detected attack category
   blockedAt?: string;
   timestamp: string;
 }
@@ -174,6 +164,37 @@ export interface DefenseStats {
   passedCount: number;
   overallDefenseScore: number;
   filterPerformance?: Record<string, FilterPerformance>;
+}
+
+// ─── Evaluation ───────────────────────────────────────────────────────────────
+
+export type EvalVerdict = 'breach' | 'defended' | 'partial';
+
+/**
+ * Result from the evaluation node.
+ * Contains both the original attack prompt and defense response for context.
+ */
+export interface EvalResult {
+  evalId: string;
+  promptId: string;
+  verdict: EvalVerdict;
+  score: number;           // 0–1, higher = more successful attack
+  reasoning: string;       // evaluator explanation
+  timestamp: string;
+  // Denormalised context for display (populated from linked attack/defense data)
+  attackContent?: string;
+  defenseContent?: string;
+  was_blocked?: boolean;
+  attack_type?: string;
+}
+
+export interface EvalStats {
+  total: number;
+  breaches: number;
+  defended: number;
+  partial: number;
+  averageScore: number;
+  breachRate: number;       // 0–1
 }
 
 // ─── WebSocket Events ──────────────────────────────────────────────────────────
@@ -207,4 +228,17 @@ export interface WSAttackStats {
 }
 export interface WSDefenseStats {
   runId: string; stats: DefenseStats;
+}
+
+/**
+ * Fired by the evaluation node after each attack-defense cycle.
+ * Suggested new backend event — see API_DOCS.md.
+ */
+export interface WSEvalResult {
+  runId: string;
+  result: EvalResult;
+}
+export interface WSEvalStats {
+  runId: string;
+  stats: EvalStats;
 }

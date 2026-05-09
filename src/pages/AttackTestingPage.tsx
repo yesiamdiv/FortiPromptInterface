@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+// pages/AttackTestingPage.tsx
+// Execution dashboard only — no config, no start button (RunShell handles start).
+// Two sections: 1) stat chips  2) indexed prompt list with expand-on-click.
+
+import React, { useState } from 'react';
 import { AttackPrompt, AttackStatus } from '../types';
 import { useAppStore } from '../store/appStore';
-import { startAutomaticRun, stopRun } from '../services/api';
-import { websocketService } from '../services/websocket';
 
-interface AttackTestingPageProps {
-  embedded?: boolean;
-}
+interface AttackTestingPageProps { embedded?: boolean; }
 
 const STATUS_CFG: Record<AttackStatus, { label: string; bg: string; color: string; dot: string }> = {
   generated: { label: 'Generated', bg: '#EFF6FF', color: '#1D4ED8', dot: '#3B82F6' },
@@ -17,252 +17,211 @@ const STATUS_CFG: Record<AttackStatus, { label: string; bg: string; color: strin
 };
 
 const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false }) => {
-  const activeRunId   = useAppStore(s => s.activeRunId);
-  const attackPrompts = useAppStore(s => s.attackPrompts);
-  const attackStats   = useAppStore(s => s.attackStats);
-  const isAttacking   = useAppStore(s => s.isAttacking);
-  const attackError   = useAppStore(s => s.attackError);
-  const runProgress   = useAppStore(s => s.runProgress);
-
+  const attackPrompts    = useAppStore(s => s.attackPrompts);
+  const attackStats      = useAppStore(s => s.attackStats);
+  const isAttacking      = useAppStore(s => s.isAttacking);
+  const attackError      = useAppStore(s => s.attackError);
+  const runProgress      = useAppStore(s => s.runProgress);
   const clearAttackPrompts = useAppStore(s => s.clearAttackPrompts);
-  const setIsAttacking     = useAppStore(s => s.setIsAttacking);
-  const setAttackError     = useAppStore(s => s.setAttackError);
-  const updateRun          = useAppStore(s => s.updateRun);
+  const setAttackError   = useAppStore(s => s.setAttackError);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!activeRunId || embedded) return;
-    websocketService.joinRun(activeRunId);
-    return () => { websocketService.leaveRun(activeRunId); };
-  }, [activeRunId, embedded]);
+  // ─────────────────────────────────────────────────────────────────────────────
 
-  // ── Start ─────────────────────────────────────────────────────────────────────
-  // RunConfigPanel (in RunShell) already synced the params via debounced PATCH.
-  // This function only triggers execution — no PATCH here.
-  const handleStart = async () => {
-    if (!activeRunId) return;
-    setAttackError(null);
-    clearAttackPrompts();
-    setIsAttacking(true);
-    updateRun(activeRunId, { status: 'running', updatedAt: new Date().toISOString() });
-    try {
-      await startAutomaticRun(activeRunId, { runtime_config: {} });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Attack failed';
-      setAttackError(msg);
-      setIsAttacking(false);
-      updateRun(activeRunId, { status: 'failed', updatedAt: new Date().toISOString() });
-    }
-  };
+  const statItems = attackStats
+    ? [
+        { label: 'Total',     val: attackStats.totalPrompts,     color: '#1A1A1A' },
+        { label: 'Generated', val: attackStats.attacksGenerated, color: '#1D4ED8' },
+        { label: 'Pending',   val: attackStats.pendingAttacks,   color: '#B45309' },
+        { label: 'Breached',  val: attackPrompts.filter(p => p.status === 'breached').length, color: '#DC2626' },
+        { label: 'Blocked',   val: attackPrompts.filter(p => p.status === 'blocked').length,  color: '#15803D' },
+      ]
+    : null;
 
-  const handleStop = async () => {
-    if (!activeRunId) return;
-    try { await stopRun(activeRunId); } catch { /* best-effort */ }
-    setIsAttacking(false);
-    updateRun(activeRunId, { status: 'paused', updatedAt: new Date().toISOString() });
-  };
-
-  const body = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 20 }}>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif" }}>
       <style>{`
-        @keyframes at-spin { to { transform: rotate(360deg); } }
+        @keyframes at-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+        @keyframes at-spin  { to{transform:rotate(360deg)} }
         .at-spin { animation: at-spin .8s linear infinite; }
-        .at-prompt-row:hover td { background: #FAFAF9 !important; }
+        .at-row:hover { background: #F7F6F3 !important; }
       `}</style>
 
-      {/* Error */}
+      {/* ── Header ── */}
+      <div style={{ padding: '20px 24px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-.3px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            Attack Testing
+            {isAttacking && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 500, color: '#1D4ED8', background: '#EFF6FF', padding: '2px 8px', borderRadius: 12 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#3B82F6', display: 'inline-block', animation: 'at-pulse 1.5s infinite' }}/>
+                Live
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>
+            {isAttacking
+              ? 'Prompts are being generated and sent…'
+              : attackPrompts.length > 0
+              ? `${attackPrompts.length} prompts generated — run complete`
+              : 'Configure the left panel then click Start Run'}
+          </div>
+        </div>
+        {attackPrompts.length > 0 && !isAttacking && (
+          <button onClick={clearAttackPrompts} style={{ fontSize: 11, color: '#AAA', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, marginTop: 2 }}>
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* ── Error ── */}
       {attackError && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, fontSize: 12, color: '#DC2626' }}>
+        <div style={{ margin: '12px 24px 0', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 13px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, fontSize: 12, color: '#DC2626' }}>
           ⚠ {attackError}
           <button style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14 }} onClick={() => setAttackError(null)}>✕</button>
         </div>
       )}
 
-      {/* Header + action */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-.3px' }}>Attack Testing</div>
-          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-            {isAttacking
-              ? 'Run in progress — prompts streaming below'
-              : 'Params saved in left panel. Click Start to begin.'}
-          </div>
-        </div>
-        <button
-          onClick={isAttacking ? handleStop : handleStart}
-          disabled={!activeRunId}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 7,
-            padding: '9px 22px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: isAttacking ? '#EF4444' : '#1A1A1A', color: '#fff',
-            fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-            opacity: !activeRunId ? .45 : 1, transition: 'background .15s', flexShrink: 0,
-          }}
-        >
-          {isAttacking ? (
-            <><span style={{ width: 8, height: 8, background: '#fff', borderRadius: 2, display: 'inline-block' }}/> Stop</>
-          ) : (
-            <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 1.5L8.5 5L2 8.5V1.5Z" fill="white"/></svg> Start Attack</>
-          )}
-        </button>
-      </div>
-
-      {/* ── Stats card ── */}
-      <div style={CARD}>
-        <div style={CARD_HD}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Run Statistics</div>
-          <div style={{ fontSize: 11, color: '#BBB', marginTop: 1 }}>
-            {isAttacking ? 'Live' : attackStats ? 'Last run complete' : 'Awaiting run'}
-          </div>
-        </div>
-        <div style={{ padding: 20 }}>
-          {attackStats ? (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-                {[
-                  { label: 'Total',     val: attackStats.totalPrompts },
-                  { label: 'Generated', val: attackStats.attacksGenerated },
-                  { label: 'Pending',   val: attackStats.pendingAttacks },
-                ].map(({ label, val }) => (
-                  <div key={label} style={{ background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 8, padding: '12px 14px' }}>
-                    <div style={{ fontFamily: 'DM Mono,monospace', fontSize: 22, fontWeight: 500, color: '#1A1A1A' }}>{val}</div>
-                    <div style={{ fontSize: 10, color: '#BBB', marginTop: 2, textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</div>
-                  </div>
-                ))}
+      {/* ── Section 1: Stat chips ── */}
+      <div style={{ padding: '16px 24px 0' }}>
+        {statItems ? (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {statItems.map(({ label, val, color }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
+                <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color }}>{val}</span>
+                <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
               </div>
-              {attackStats.totalPrompts > 0 && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#999', marginBottom: 5 }}>
-                    <span>Progress</span>
-                    <span style={{ fontFamily: 'DM Mono,monospace' }}>
-                      {Math.round((attackStats.attacksGenerated / attackStats.totalPrompts) * 100)}%
-                    </span>
-                  </div>
-                  <div style={{ height: 4, background: '#E8E6E0', borderRadius: 2 }}>
-                    <div style={{ height: '100%', width: `${(attackStats.attacksGenerated / attackStats.totalPrompts) * 100}%`, background: '#1A1A1A', borderRadius: 2, transition: 'width .4s' }}/>
-                  </div>
+            ))}
+            {/* Progress bar when running */}
+            {isAttacking && attackStats && attackStats.totalPrompts > 0 && (
+              <div style={{ flex: '1 1 100%', marginTop: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#BBB', marginBottom: 4 }}>
+                  <span>Progress</span>
+                  <span style={{ fontFamily: 'DM Mono,monospace' }}>
+                    {Math.round((attackStats.attacksGenerated / attackStats.totalPrompts) * 100)}%
+                  </span>
                 </div>
-              )}
-            </>
-          ) : runProgress ? (
-            <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>{runProgress.message}</div>
-              <div style={{ height: 4, background: '#E8E6E0', borderRadius: 2 }}>
-                <div style={{ height: '100%', width: `${runProgress.progress_percent}%`, background: '#1A1A1A', borderRadius: 2, transition: 'width .4s' }}/>
+                <div style={{ height: 3, background: '#E8E6E0', borderRadius: 2 }}>
+                  <div style={{ height: '100%', width: `${(attackStats.attacksGenerated / attackStats.totalPrompts) * 100}%`, background: '#3B82F6', borderRadius: 2, transition: 'width .4s' }}/>
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: '#BBB', marginTop: 5, fontFamily: 'DM Mono,monospace' }}>
-                {runProgress.current} / {runProgress.total}
-              </div>
+            )}
+          </div>
+        ) : runProgress ? (
+          <div style={{ padding: '10px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>{runProgress.message}</div>
+            <div style={{ height: 3, background: '#E8E6E0', borderRadius: 2 }}>
+              <div style={{ height: '100%', width: `${runProgress.progress_percent}%`, background: '#3B82F6', borderRadius: 2, transition: 'width .4s' }}/>
             </div>
-          ) : (
-            <div style={{ textAlign: 'center', color: '#CCC', fontSize: 13, padding: '20px 0' }}>
-              {isAttacking ? 'Waiting for first result…' : 'Start an attack to see live statistics'}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Prompt table ── */}
-      <div style={CARD}>
-        <div style={{ ...CARD_HD, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Generated Prompts</div>
-            <div style={{ fontSize: 11, color: '#BBB', marginTop: 1 }}>
-              {isAttacking ? 'Streaming live…' : `${attackPrompts.length} total`}
+            <div style={{ fontSize: 10, color: '#BBB', marginTop: 4, fontFamily: 'DM Mono,monospace' }}>
+              {runProgress.current} / {runProgress.total}
             </div>
           </div>
-          {attackPrompts.length > 0 && (
-            <button onClick={clearAttackPrompts} style={{ fontSize: 11, color: '#888', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Clear
-            </button>
-          )}
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['Total', 'Generated', 'Pending', 'Breached', 'Blocked'].map(l => (
+              <div key={l} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 8 }}>
+                <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: '#DDD' }}>—</span>
+                <span style={{ fontSize: 10, color: '#CCC', textTransform: 'uppercase', letterSpacing: '.3px' }}>{l}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Section 2: Prompt list ── */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>
+        {/* List header */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #F0EDE6', flexShrink: 0 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>Generated Prompts</span>
+          <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#BBB' }}>
+            {isAttacking
+              ? <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <svg className="at-spin" width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="#E8E6E0" strokeWidth="1.5"/><path d="M5.5 1.5a4 4 0 0 1 4 4" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                  streaming
+                </span>
+              : `${attackPrompts.length} total`}
+          </span>
         </div>
 
         {attackPrompts.length === 0 ? (
-          <div style={{ padding: '48px 20px', textAlign: 'center', color: '#CCC', fontSize: 13 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#CCC' }}>
             {isAttacking ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                <svg className="at-spin" width="22" height="22" viewBox="0 0 22 22" fill="none">
-                  <circle cx="11" cy="11" r="9" stroke="#E8E6E0" strokeWidth="2"/>
-                  <path d="M11 2a9 9 0 0 1 9 9" stroke="#1A1A1A" strokeWidth="2" strokeLinecap="round"/>
+              <>
+                <svg className="at-spin" width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="#E8E6E0" strokeWidth="2"/>
+                  <path d="M12 3a9 9 0 0 1 9 9" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round"/>
                 </svg>
-                Generating prompts…
-              </div>
+                <span style={{ fontSize: 13 }}>Waiting for first prompt…</span>
+              </>
             ) : (
-              'No prompts yet — start an attack'
+              <span style={{ fontSize: 13 }}>No prompts yet — start the run</span>
             )}
           </div>
         ) : (
-          <>
-            <div style={{ maxHeight: 440, overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: '#FAFAF9' }}>
-                    {['#', 'Status', 'Content', 'Time'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '9px 16px', fontSize: 10, fontWeight: 500, color: '#BBB', textTransform: 'uppercase', letterSpacing: '.3px', borderBottom: '1px solid #F0EDE6' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {attackPrompts.map((p: AttackPrompt, idx: number) => {
-                    const sc    = STATUS_CFG[p.status] ?? { label: p.status, bg: '#F7F6F3', color: '#888', dot: '#CCC' };
-                    const isExp = expandedId === p.promptId;
-                    return (
-                      <tr key={p.promptId} className="at-prompt-row" style={{ cursor: 'pointer' }} onClick={() => setExpandedId(isExp ? null : p.promptId)}>
-                        <td style={{ padding: '10px 16px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#DDD', borderBottom: '1px solid #F9F8F6', verticalAlign: 'middle' }}>
-                          {String(idx + 1).padStart(2, '0')}
-                        </td>
-                        <td style={{ padding: '10px 16px', borderBottom: '1px solid #F9F8F6', verticalAlign: 'middle' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color }}>
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc.dot, display: 'inline-block' }}/>
-                            {sc.label}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px', borderBottom: '1px solid #F9F8F6', fontFamily: 'DM Mono,monospace', fontSize: 11, color: '#666', maxWidth: 500, overflow: 'hidden', textOverflow: isExp ? 'initial' : 'ellipsis', whiteSpace: isExp ? 'normal' : 'nowrap', verticalAlign: 'middle', wordBreak: 'break-word' }}>
-                          {p.content}
-                        </td>
-                        <td style={{ padding: '10px 16px', borderBottom: '1px solid #F9F8F6', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-                          {new Date(p.timestamp).toLocaleTimeString()}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Summary */}
-            <div style={{ display: 'flex', gap: 14, padding: '10px 16px', borderTop: '1px solid #F0EDE6', background: '#FAFAF9', alignItems: 'center', flexWrap: 'wrap' }}>
-              {(['generated', 'sent', 'breached', 'blocked', 'failed'] as AttackStatus[]).map(s => {
-                const sc    = STATUS_CFG[s];
-                const count = attackPrompts.filter(p => p.status === s).length;
-                if (!count) return null;
-                return (
-                  <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#888' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: sc.dot, display: 'inline-block' }}/>
-                    <span style={{ fontFamily: 'DM Mono,monospace', fontWeight: 500, color: '#1A1A1A' }}>{count}</span>
-                    <span>{sc.label}</span>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {attackPrompts.map((p: AttackPrompt, idx: number) => {
+              const sc    = STATUS_CFG[p.status] ?? { label: p.status, bg: '#F7F6F3', color: '#888', dot: '#CCC' };
+              const isExp = expandedId === p.promptId;
+              return (
+                <div
+                  key={p.promptId}
+                  className="at-row"
+                  style={{ display: 'grid', gridTemplateColumns: '40px auto 1fr auto', gap: 0, borderBottom: '1px solid #F9F8F6', cursor: 'pointer', alignItems: isExp ? 'flex-start' : 'center', transition: 'background .1s' }}
+                  onClick={() => setExpandedId(isExp ? null : p.promptId)}
+                >
+                  {/* Index */}
+                  <div style={{ padding: '12px 0 12px 16px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', userSelect: 'none' }}>
+                    {String(idx + 1).padStart(2, '0')}
                   </div>
-                );
-              })}
-              <div style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 11, color: '#999' }}>
-                Total: <strong style={{ color: '#1A1A1A' }}>{attackPrompts.length}</strong>
-              </div>
+
+                  {/* Status badge */}
+                  <div style={{ padding: '12px 12px 12px 8px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 20, fontSize: 10, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: 'nowrap' }}>
+                      <span style={{ width: 4, height: 4, borderRadius: '50%', background: sc.dot, display: 'inline-block', flexShrink: 0 }}/>
+                      {sc.label}
+                    </span>
+                  </div>
+
+                  {/* Content */}
+                  <div style={{ padding: '12px 8px', fontFamily: 'DM Mono,monospace', fontSize: 11, color: '#555', overflow: 'hidden', textOverflow: isExp ? 'initial' : 'ellipsis', whiteSpace: isExp ? 'pre-wrap' : 'nowrap', wordBreak: 'break-word', lineHeight: 1.55 }}>
+                    {p.content}
+                  </div>
+
+                  {/* Time */}
+                  <div style={{ padding: '12px 16px 12px 8px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {new Date(p.timestamp).toLocaleTimeString()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Status breakdown footer */}
+        {attackPrompts.length > 0 && (
+          <div style={{ display: 'flex', gap: 12, padding: '8px 16px', borderTop: '1px solid #F0EDE6', background: '#FAFAF9', flexWrap: 'wrap', flexShrink: 0 }}>
+            {(['generated', 'sent', 'breached', 'blocked', 'failed'] as AttackStatus[]).map(s => {
+              const count = attackPrompts.filter(p => p.status === s).length;
+              if (!count) return null;
+              const sc = STATUS_CFG[s];
+              return (
+                <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#888' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: sc.dot, display: 'inline-block' }}/>
+                  <span style={{ fontFamily: 'DM Mono,monospace', fontWeight: 500, color: '#555' }}>{count}</span>
+                  <span style={{ color: '#AAA' }}>{sc.label}</span>
+                </div>
+              );
+            })}
+            <div style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#BBB' }}>
+              {attackPrompts.length} total
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
   );
-
-  // Always embedded via RunShell — standalone not needed
-  return body;
 };
-
-const CARD: React.CSSProperties    = { background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, overflow: 'hidden' };
-const CARD_HD: React.CSSProperties = { padding: '12px 20px', borderBottom: '1px solid #F0EDE6' };
 
 export default AttackTestingPage;

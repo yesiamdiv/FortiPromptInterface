@@ -25,6 +25,8 @@ import { NodeSchema, StrategySchema, UpdateRunRequest } from '../types';
 interface RunConfigPanelProps {
   /** Called whenever any editable param changes. Parent should debounce + call updateRun. */
   onParamsChange?: (update: UpdateRunRequest) => void;
+  /** When true, all fields are read-only (run is executing). */
+  locked?: boolean;
 }
 
 // ─── Schema field renderer ─────────────────────────────────────────────────────
@@ -125,7 +127,7 @@ const Section: React.FC<{
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange }) => {
+const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked = false }) => {
   const activeRunId    = useAppStore(s => s.activeRunId);
   const runs           = useAppStore(s => s.runs);
   const runDiscovery   = useAppStore(s => s.runDiscovery);
@@ -201,21 +203,25 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange }) => {
 
   // ── Emit changes upstream ──────────────────────────────────────────────────
   const handleAttackChange = (key: string, val: any) => {
+    if (locked) return;
     const next = { ...attackParams, [key]: val };
     setAttackParams(next);
     onParamsChange?.({ attack_node_params: next });
   };
   const handleDefenseChange = (key: string, val: any) => {
+    if (locked) return;
     const next = { ...defenseParams, [key]: val };
     setDefenseParams(next);
     onParamsChange?.({ defense_node_params: next });
   };
   const handleEvalChange = (key: string, val: any) => {
+    if (locked) return;
     const next = { ...evalParams, [key]: val };
     setEvalParams(next);
     onParamsChange?.({ evaluation_node_params: next });
   };
   const handleStrategyChange = (key: string, val: any) => {
+    if (locked) return;
     const next = { ...strategyParams, [key]: val };
     setStrategyParams(next);
     onParamsChange?.({ strategy_params: next });
@@ -247,6 +253,12 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange }) => {
 
   return (
     <div style={S.root}>
+      {locked && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: '#FFFBEB', borderBottom: '1px solid #FCD34D', fontSize: 11, color: '#92400E' }}>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="2" y="4.5" width="7" height="5.5" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M3.5 4.5V3a2 2 0 0 1 4 0v1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+          Config locked while running
+        </div>
+      )}
       {/* ── Run info ── */}
       <div style={S.runInfo}>
         <div style={S.runName}>{run.name}</div>
@@ -272,7 +284,8 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange }) => {
       ) : (
         <>
           {/* ── Attack Node ── */}
-          {!isManual && (
+          {
+          // !isManual && (
             <Section
               icon={<Zap size={13} />}
               title="Attack Node"
@@ -291,10 +304,12 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange }) => {
                 onChange={handleAttackChange}
               />
             </Section>
-          )}
+          // )
+          }
 
           {/* ── Defense Node ── */}
-          {!isManual && (
+          {
+          // !isManual && (
             <Section
               icon={<Shield size={13} />}
               title="Defense Node"
@@ -313,7 +328,8 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange }) => {
                 onChange={handleDefenseChange}
               />
             </Section>
-          )}
+          // )
+          }
 
           {/* ── Evaluation Node ── */}
           <Section
