@@ -12,7 +12,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Save, Trash2, Plus, CheckCircle2, XCircle, AlertTriangle, Clock, Zap, Shield, Loader, BarChart2, MessageSquare } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useManualStore } from '../store/manualStore';
-import { fetchManualSessions, saveSession, fetchManualStats, deleteManualSession, createManualSession, submitManualTurn, getManualSessionHistory } from '../services/api';
+import { fetchManualSessions, deleteManualSession, createManualSession, submitManualTurn, getManualSessionHistory, fetchRunStats } from '../services/api';
 import { websocketService } from '../services/websocket';
 import { ChatSession, ChatTurn, EvaluationLabel } from '../types/manual';
 
@@ -161,12 +161,27 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     (async () => {
       setLoading(true);
       try {
-        const [sess, stats] = await Promise.all([
+        const [sess, runStats] = await Promise.all([
           fetchManualSessions(activeRunId).catch(() => []),
-          fetchManualStats(activeRunId).catch(() => null),
+          fetchRunStats(activeRunId).catch(() => null),
         ]);
         setSessions(sess ?? []);
-        if (stats) setManualStats(stats);
+        // Map run stats to ManualRunStats shape for the UI stat chips
+        if (runStats) {
+          setManualStats({
+            total_sessions:  sess?.length ?? 0,
+            saved_sessions:  0,
+            active_sessions: (sess ?? []).filter((s: any) => s.status === 'active').length,
+            breach_count:    runStats.total_evaluations
+              ? Math.round(runStats.success_rate * runStats.total_evaluations)
+              : 0,
+            blocked_count:   runStats.total_evaluations
+              ? Math.round(runStats.blocked_rate * runStats.total_evaluations)
+              : 0,
+            partial_count:   0,
+            average_score:   runStats.average_score,
+          });
+        }
       } catch (e: any) { setManualError(e.message); }
       finally { setLoading(false); }
     })();
@@ -198,17 +213,49 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     setLoadingHistory(true);
     try {
       const history = await getManualSessionHistory(activeRunId!, sess.session_id);
+      // Assemble ChatTurn[] from raw typed records per API contract:
+      // attack_data.prompt → role 'attacker'
+      // defence_data.response → role 'defense'
+      // evaluation_data.feedback → role 'evaluation'
+      const assembledTurns: ChatTurn[] = [];
+      for (const raw of history.turns) {
+        if (raw.attack_data) {
+          assembledTurns.push({
+            turn_id:   `atk-${raw.turn_id}`,
+            role:      'attacker',
+            content:   raw.attack_data.metadata?.user_input ?? raw.attack_data.prompt,
+            timestamp: raw.attack_data.timestamp,
+            metadata:  raw.attack_data.metadata ?? {},
+          });
+        }
+        if (raw.defence_data) {
+          assembledTurns.push({
+            turn_id:   `def-${raw.turn_id}`,
+            role:      'defense',
+            content:   raw.defence_data.response,
+            timestamp: raw.defence_data.timestamp,
+            metadata:  { was_blocked: raw.defence_data.was_blocked, ...raw.defence_data.metadata },
+          });
+        }
+        if (raw.evaluation_data) {
+          const label = raw.evaluation_data.success ? 'breached' : 'blocked';
+          assembledTurns.push({
+            turn_id:   `eval-${raw.turn_id}`,
+            role:      'evaluation',
+            content:   raw.evaluation_data.feedback,
+            timestamp: raw.evaluation_data.timestamp,
+            metadata:  { label, score: raw.evaluation_data.score, category: raw.evaluation_data.category },
+          });
+        }
+      }
       const full: ChatSession = {
         ...history.session,
-        turns: history.turns.map(t => ({
-          ...t,
-          content: t.role === 'attacker' ? (t.metadata?.user_input ?? t.content) : t.content,
-        })),
+        turns: assembledTurns,
       };
       updateSession(sess.session_id, full);
       setActiveSession(full);
       if (full.status === 'active') websocketService.joinSessionRoom(sess.session_id);
-    } catch { /* fall back */ }
+    } catch { /* fall back to empty turns */ }
     finally { setLoadingHistory(false); }
   };
 
@@ -259,25 +306,40 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
   };
 
   // ── Save & evaluate ───────────────────────────────────────────────────────────
+  // Note: The API v2 contract does not have a dedicated "save session" endpoint.
+  // Sessions are managed via WebSocket events (run_idle, manual_evaluation_complete).
+  // This handler closes the modal and marks the session as completed locally.
   const handleSaveSession = async () => {
     if (!activeRunId || !activeSession || isSavingSession) return;
     setIsSavingSession(true);
     try {
-      const result = await saveSession(activeRunId, activeSession.session_id, { label: saveLabelInput || undefined });
+      // Locally mark as completed — the evaluation results are already in the
+      // turns array from manual_evaluation_complete WS events.
       const patch = {
-        status:               'evaluated' as const,
-        evaluation_score:     result.evaluation_score,
-        evaluation_label:     result.evaluation_label,
-        evaluation_reasoning: result.evaluation_reasoning,
-        saved_at:             new Date().toISOString(),
-        evaluated_at:         new Date().toISOString(),
+        status: 'completed' as const,
       };
       updateSession(activeSession.session_id, patch);
       setActiveSession({ ...activeSession, ...patch });
       setShowSaveModal(false);
       setSaveLabelInput('');
-      const stats = await fetchManualStats(activeRunId).catch(() => null);
-      if (stats) setManualStats(stats);
+      // Refresh run stats
+      const runStats = await fetchRunStats(activeRunId).catch(() => null);
+      if (runStats) {
+        const sess = sessions;
+        setManualStats({
+          total_sessions:  sess.length,
+          saved_sessions:  sess.filter(s => s.status === 'completed').length + 1,
+          active_sessions: sess.filter(s => s.status === 'active').length,
+          breach_count:    runStats.total_evaluations
+            ? Math.round(runStats.success_rate * runStats.total_evaluations)
+            : 0,
+          blocked_count:   runStats.total_evaluations
+            ? Math.round(runStats.blocked_rate * runStats.total_evaluations)
+            : 0,
+          partial_count:   0,
+          average_score:   runStats.average_score,
+        });
+      }
     } catch (e: any) { setManualError(e.message); }
     finally { setIsSavingSession(false); }
   };
@@ -398,15 +460,15 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {sess.label ?? sess.session_id.slice(-8)}
+                        {sess.name || sess.session_id.slice(-8)}
                       </div>
                       <div style={{ fontSize: 10, color: '#AAA', marginTop: 2 }}>
-                        {sess.turns.length} turn{sess.turns.length !== 1 ? 's' : ''} · {new Date(sess.created_at).toLocaleDateString()}
+                        {sess.total_turns} turn{sess.total_turns !== 1 ? 's' : ''} · {new Date(sess.created_at).toLocaleDateString()}
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                       <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, fontWeight: 500, background: sess.status === 'active' ? '#EEF2FF' : c.bg, color: sess.status === 'active' ? '#4F46E5' : c.text, border: `1px solid ${sess.status === 'active' ? '#C7D2FE' : c.border}` }}>
-                        {sess.status === 'active' ? 'live' : (sess.evaluation_label ?? 'saved')}
+                        {sess.status === 'active' ? 'live' : sess.status}
                       </span>
                       <button
                         className="man-del"
@@ -417,7 +479,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
                       </button>
                     </div>
                   </div>
-                  {sess.status === 'evaluated' && <ScoreBar score={sess.evaluation_score}/>}
+                  {sess.evaluation_score != null && <ScoreBar score={sess.evaluation_score}/>}
                 </div>
               );
             })
@@ -443,7 +505,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
             <div style={{ padding: '9px 20px', background: '#fff', borderBottom: '1px solid #E8E6E0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {activeSession.label ?? activeSession.session_id.slice(-8)}
+                  {activeSession.name || activeSession.session_id.slice(-8)}
                 </div>
                 <div style={{ fontSize: 10, color: '#AAA', marginTop: 1 }}>
                   {activeSession.turns.length} turn{activeSession.turns.length !== 1 ? 's' : ''} · {new Date(activeSession.created_at).toLocaleTimeString()}
@@ -451,12 +513,12 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {activeSession.status === 'evaluated' && (() => {
+                {activeSession.status === 'completed' && (() => {
                   const c = evalColor(activeSession.evaluation_label);
                   return (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 500, padding: '3px 9px', borderRadius: 20, background: c.bg, color: c.text, border: `1px solid ${c.border}` }}>
                       {evalIcon(activeSession.evaluation_label)}
-                      {activeSession.evaluation_label}
+                      {activeSession.evaluation_label ?? 'completed'}
                       {activeSession.evaluation_score != null && ` · ${Math.round(activeSession.evaluation_score * 100)}%`}
                     </span>
                   );
@@ -532,7 +594,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 20px', background: '#F0FDF4', borderTop: '1px solid #BBF7D0', color: '#15803D', fontSize: 12, fontWeight: 500, flexShrink: 0 }}>
-                <CheckCircle2 size={12}/>Session saved — create a new session to continue.
+                <CheckCircle2 size={12}/>Session completed — create a new session to continue.
               </div>
             )}
           </>
@@ -554,7 +616,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
               <label style={{ fontSize: 10, fontWeight: 500, color: '#999', textTransform: 'uppercase', letterSpacing: '.4px' }}>Session Label (optional)</label>
               <input
                 style={{ height: 32, background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 7, padding: '0 10px', fontSize: 12, fontFamily: 'inherit', color: '#1A1A1A', outline: 'none' }}
-                placeholder={activeSession?.label ?? 'e.g. SQL injection attempt'}
+                // placeholder={activeSession?.label ?? 'e.g. SQL injection attempt'}
                 value={saveLabelInput}
                 onChange={e => setSaveLabelInput(e.target.value)}
                 autoFocus

@@ -218,16 +218,37 @@ export interface WSNewRunAvailable {
   run_id: string; run_summary: { name: string; strategy: string; status: string };
 }
 export interface WSAttackGenerated {
-  runId: string; prompt: AttackPrompt;
+  run_id: string;
+  turn_id: string;
+  index: number;
+  attack: {
+    preview: string;
+    full_text: string;
+    type?: string;
+    metadata?: Record<string, any>;
+    timestamp?: string;
+  };
 }
 export interface WSDefenseResponseGenerated {
-  runId: string; response: DefenseResponse;
+  run_id: string;
+  turn_id: string;
+  index: number;
+  defence: {
+    preview?: string;
+    full_text?: string;
+    status_code?: number;
+    was_blocked?: boolean;
+    latency_ms?: number;
+    blocked_by?: string;
+    attack_type?: string;
+    timestamp?: string;
+  };
 }
 export interface WSAttackStats {
-  runId: string; stats: AttackStats;
+  run_id: string; stats: AttackStats;
 }
 export interface WSDefenseStats {
-  runId: string; stats: DefenseStats;
+  run_id: string; stats: DefenseStats;
 }
 
 /**
@@ -235,10 +256,19 @@ export interface WSDefenseStats {
  * Suggested new backend event — see API_DOCS.md.
  */
 export interface WSEvalResult {
-  runId: string;
-  result: EvalResult;
+  run_id: string;
+  turn_id: string;
+  index: number;
+  evaluation: {
+    score?: number;
+    success?: boolean;
+    category?: string;
+    reasoning?: string;
+    summary?: string;
+    timestamp?: string;
+  };
 }
 export interface WSEvalStats {
-  runId: string;
+  run_id: string;
   stats: EvalStats;
 }

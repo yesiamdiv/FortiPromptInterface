@@ -1,7 +1,7 @@
 // types/manual.ts
 
 export type ChatRole = 'attacker' | 'target' | 'defense' | 'evaluation';
-export type SessionStatus = 'active' | 'saved' | 'evaluated';
+export type SessionStatus = 'active' | 'completed' | 'idle';
 export type EvaluationLabel = 'breached' | 'blocked' | 'partial';
 export type FilterMode = 'none' | 'regex' | 'semantic' | 'llm_judge';
 
@@ -19,19 +19,27 @@ export interface ChatTurn {
 
 // ─── Session ───────────────────────────────────────────────────────────────────
 
+/**
+ * Mirrors the backend SessionObject exactly.
+ * Extra UI-only fields (turns, evaluation_*) are layered on top locally.
+ */
 export interface ChatSession {
+  // Backend SessionObject fields (snake_case, exact)
   session_id: string;
   run_id: string;
-  label?: string;
-  turns: ChatTurn[];
-  status: SessionStatus;
+  name: string;          // backend field — use this as the display label
+  description: string | null;
+  status: 'active' | 'completed' | 'idle';
+  created_at: string;
+  updated_at: string;
+  turn_ids: string[];
+  total_turns: number;
+
+  // UI-only fields — populated locally after fetching history or from WS events
+  turns: ChatTurn[];               // assembled ChatTurn objects (not persisted)
   evaluation_score?: number;
   evaluation_label?: EvaluationLabel;
   evaluation_reasoning?: string;
-  defense_filter_used?: string;
-  created_at: string;
-  saved_at?: string;
-  evaluated_at?: string;
 }
 
 // ─── Config ────────────────────────────────────────────────────────────────────
@@ -74,9 +82,38 @@ export interface CreateManualSessionRequest {
 
 export interface ManualSessionResponse extends ChatSession {}
 
+/**
+ * GET /runs/{run_id}/sessions/{session_id}/history
+ * The `turns` array contains raw typed records (attack_data, defence_data, evaluation_data).
+ * The frontend must assemble ChatTurn objects from these sub-records.
+ */
+export interface RawTurnRecord {
+  session_id: string;
+  run_id: string;
+  index: number;
+  turn_id: string;
+  attack_data_id?: string;
+  defence_data_id?: string;
+  evaluation_data_id?: string;
+  attack_data?: {
+    run_id: string; index: number; turn_id: string;
+    prompt: string; metadata: Record<string, any>; timestamp: string;
+  };
+  defence_data?: {
+    run_id: string; index: number; turn_id: string;
+    response: string; status_code: number; was_blocked: boolean;
+    metadata: Record<string, any>; timestamp: string;
+  };
+  evaluation_data?: {
+    run_id: string; index: number; turn_id: string;
+    score: number; success: boolean; category: string;
+    feedback: string; metadata: Record<string, any>; timestamp: string;
+  };
+}
+
 export interface ManualTurnHistoryResponse {
   session: ChatSession;
-  turns: ChatTurn[];
+  turns: RawTurnRecord[];
 }
 
 /** Used by POST /runs/{run_id}/sessions/{session_id}/manual_turn */
@@ -121,7 +158,7 @@ export interface SaveSessionResponse {
 // ─── WebSocket Events ──────────────────────────────────────────────────────────
 
 export interface WSManualSessionCreated {
-  runId: string;
+  run_id: string;
   session: ChatSession;
 }
 

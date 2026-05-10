@@ -17,7 +17,7 @@ import {
 } from '../types';
 
 import {
-  WSManualSessionCreated, WSManualAttackGenerated,
+  WSManualAttackGenerated,
   WSManualDefenseResponse, WSManualEvaluationComplete,
   WSManualTurnCompleted, WSRunIdle,
 } from '../types/manual';
@@ -29,6 +29,7 @@ class WebSocketService {
   connect(url: string, authToken?: string): void {
     if (this.socket?.connected) return;
     this.socket = io(url, {
+      path: '/socket.io',  // explicit — matches backend mount
       auth: authToken ? { token: authToken } : undefined,
       reconnection: true,
       reconnectionDelay: 1000,
@@ -44,10 +45,10 @@ class WebSocketService {
   }
 
   joinRun(runId: string): void {
-    this.socket?.emit('join_run_channel', { runId });
+    this.socket?.emit('join_run_room', { run_id: runId });
   }
   leaveRun(runId: string): void {
-    this.socket?.emit('leave_run_channel', { runId });
+    this.socket?.emit('leave_run_room', { run_id: runId });
   }
 
   /** Call immediately after createManualSession() */
@@ -127,28 +128,30 @@ class WebSocketService {
 
     s.on('attack_generated', (data: WSAttackGenerated) => {
       const { addAttackPrompt, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.runId) return;
-      addAttackPrompt(data.prompt);
-    });
-
-    s.on('attack_stats_updated', (data: WSAttackStats) => {
-      const { setAttackStats, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.runId) return;
-      setAttackStats(data.stats);
+      if (activeRunId !== data.run_id) return;   // snake_case
+      addAttackPrompt({
+        promptId:  data.turn_id,
+        content:   data.attack.full_text,
+        status:    'generated',
+        timestamp: data.attack.timestamp ?? new Date().toISOString(),
+        metadata:  data.attack.metadata ?? {},
+      });
     });
 
     // ── Defense node ───────────────────────────────────────────────────────────
 
-    s.on('defense_response_generated', (data: WSDefenseResponseGenerated) => {
+    s.on('defence_response', (data: WSDefenseResponseGenerated) => {
       const { addDefenseResponse, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.runId) return;
-      addDefenseResponse(data.response);
-    });
-
-    s.on('defense_stats_updated', (data: WSDefenseStats) => {
-      const { setDefenseStats, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.runId) return;
-      setDefenseStats(data.stats);
+      if (activeRunId !== data.run_id) return;
+      addDefenseResponse({
+        promptId:        data.turn_id,
+        defenseResponse: data.defence.full_text ?? '',
+        evaluation:      data.defence.was_blocked ? 'blocked' : 'passed',
+        was_blocked:     data.defence.was_blocked ?? false,
+        blocked_by:      data.defence.blocked_by,
+        attack_type:     data.defence.attack_type,
+        timestamp:       data.defence.timestamp ?? new Date().toISOString(),
+      });
     });
 
     // ── Evaluation node ────────────────────────────────────────────────────────
@@ -156,24 +159,26 @@ class WebSocketService {
 
     s.on('evaluation_result', (data: WSEvalResult) => {
       const { addEvalResult, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.runId) return;
-      addEvalResult(data.result);
+      if (activeRunId !== data.run_id) return;
+      addEvalResult({
+        evalId:    data.turn_id,
+        promptId:  data.turn_id,
+        verdict:   data.evaluation.success ? 'breach' : 'defended',
+        score:     data.evaluation.score ?? 0,
+        reasoning: data.evaluation.reasoning ?? '',
+        timestamp: data.evaluation.timestamp ?? new Date().toISOString(),
+      });
     });
 
     s.on('evaluation_stats_updated', (data: WSEvalStats) => {
       const { setEvalStats, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.runId) return;
+      if (activeRunId !== data.run_id) return;
       setEvalStats(data.stats);
     });
   }
 
   private setupManualRunEvents(): void {
     const s = this.socket!;
-
-    s.on('manual_session_created', (data: WSManualSessionCreated) => {
-      const { addSession } = useManualStore.getState();
-      addSession(data.session);
-    });
 
     /**
      * manual_attack_generated — user's prompt has been echoed back.

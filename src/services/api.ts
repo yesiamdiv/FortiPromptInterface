@@ -19,12 +19,14 @@ import {
   NodeSchema,
   StartAutomaticRunRequest,
   StartAutomaticRunResponse,
+  ComponentType,
 } from '../types';
 
 import {
   CreateManualSessionRequest,
   ManualSessionResponse,
   ManualTurnHistoryResponse,
+  RawTurnRecord,
   SubmitManualTurnRequest,
   SubmitManualTurnResponse,
 } from '../types/manual';
@@ -50,22 +52,53 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
 
 // ─── Normalizer ───────────────────────────────────────────────────────────────
 
+// Helper: derive component list from config if not provided by backend
+function deriveComponents(graphConfig: any): ComponentType[] {
+  if (!graphConfig) return [];
+  const components: ComponentType[] = [];
+  if (graphConfig.attack_node_config) components.push('attack');
+  if (graphConfig.defense_node_config) components.push('defense');
+  if (graphConfig.graph_type === 'manual') components.push('manual');
+  return components;
+}
+
 function normalizeRun(raw: any): Run {
+  const config = raw.graph_config ?? raw.config;
   return {
     runid:       raw.run_id,
-    name:        raw.name,
-    description: raw.description,
+    name:        raw.name ?? '',
+    description: raw.description ?? '',
     status:      raw.status,
-    components:  raw.components ?? [],
-    config:      raw.config ?? raw.graph_config, // accept either field name
+    components:  raw.components ?? deriveComponents(config),
+    config:      config,
     createdAt:   raw.created_at,
-    updatedAt:   raw.updated_at,
+    updatedAt:   raw.updated_at ?? raw.completed_at ?? raw.started_at ?? raw.created_at,
   };
 }
 
-// =============================================================================
-// CONNECTION
-// =============================================================================
+// ─── Session Normalizer ───────────────────────────────────────────────────────
+
+/**
+ * Backend returns SessionObject (with turn_ids, total_turns).
+ * Frontend ChatSession adds `turns: ChatTurn[]` which is UI-only (populated from history).
+ */
+function normalizeSession(raw: any): ManualSessionResponse {
+  return {
+    session_id:  raw.session_id,
+    run_id:      raw.run_id,
+    name:        raw.name ?? '',
+    description: raw.description ?? null,
+    status:      raw.status ?? 'idle',
+    created_at:  raw.created_at ?? new Date().toISOString(),
+    updated_at:  raw.updated_at ?? raw.created_at ?? new Date().toISOString(),
+    turn_ids:    raw.turn_ids ?? [],
+    total_turns: raw.total_turns ?? 0,
+    // UI-only fields — start empty, populated by history fetch or WS events
+    turns:       [],
+  };
+}
+
+
 
 export const testConnection = async (url: string): Promise<boolean> => {
   try { return (await fetch(`${url}/health`)).ok; } catch { return false; }
@@ -131,8 +164,40 @@ export const startAutomaticRun = async (
   });
 
 /** POST /runs/{runId}/stop */
-export const stopRun = (runId: string): Promise<void> =>
-  apiFetch<void>(`${BASE_URL}/runs/${runId}/stop`, { method: 'POST' });
+export interface StopRunResponse {
+  run_id: string;
+  status: string;
+  message?: string;
+}
+
+export const stopRun = (runId: string): Promise<StopRunResponse> =>
+  apiFetch<StopRunResponse>(`${BASE_URL}/runs/${runId}/stop`, { method: 'POST' });
+
+// =============================================================================
+// RUN DATA (SYNC)
+// =============================================================================
+
+/** GET /runs/{runId}/attacks */
+export const fetchRunAttacks = async (runId: string) => {
+  const data = await apiFetch<any>(`${BASE_URL}/runs/${runId}/attacks`);
+  return data?.attacks ?? [];
+};
+
+/** GET /runs/{runId}/defences */
+export const fetchRunDefences = async (runId: string) => {
+  const data = await apiFetch<any>(`${BASE_URL}/runs/${runId}/defences`);
+  return data?.defences ?? [];
+};
+
+/** GET /runs/{runId}/evaluations */
+export const fetchRunEvaluations = async (runId: string) => {
+  const data = await apiFetch<any>(`${BASE_URL}/runs/${runId}/evaluations`);
+  return data?.evaluations ?? [];
+};
+
+/** GET /runs/{runId}/stats */
+export const fetchRunStats = (runId: string) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/stats`);
 
 // =============================================================================
 // MANUAL EXECUTION
@@ -145,11 +210,13 @@ export const stopRun = (runId: string): Promise<void> =>
 export const createManualSession = async (
   runId: string,
   request: CreateManualSessionRequest
-): Promise<ManualSessionResponse> =>
-  apiFetch<ManualSessionResponse>(`${BASE_URL}/runs/${runId}/sessions`, {
+): Promise<ManualSessionResponse> => {
+  const raw = await apiFetch<any>(`${BASE_URL}/runs/${runId}/sessions`, {
     method: 'POST',
     body: JSON.stringify(request),
   });
+  return normalizeSession(raw);
+};
 
 /**
  * POST /runs/{runId}/sessions/{sessionId}/manual_turn
@@ -169,28 +236,40 @@ export const submitManualTurn = async (
 
 /**
  * GET /runs/{runId}/sessions/{sessionId}/history
- * ⚠ Render user bubbles from turn.metadata.user_input — NOT turn.content.
+ * Returns raw typed records. Frontend assembles ChatTurn[] from sub-records.
  */
 export const getManualSessionHistory = async (
   runId: string,
   sessionId: string
-): Promise<ManualTurnHistoryResponse> =>
-  apiFetch<ManualTurnHistoryResponse>(
+): Promise<ManualTurnHistoryResponse> => {
+  const raw = await apiFetch<any>(
     `${BASE_URL}/runs/${runId}/sessions/${sessionId}/history`
   );
+  return {
+    session: normalizeSession(raw.session),
+    turns: raw.turns ?? [],
+  };
+};
 
 /** GET /runs/{runId}/sessions/{sessionId} */
 export const getManualSession = async (
   runId: string,
   sessionId: string
-): Promise<ManualSessionResponse> =>
-  apiFetch<ManualSessionResponse>(`${BASE_URL}/runs/${runId}/sessions/${sessionId}`);
+): Promise<ManualSessionResponse> => {
+  const raw = await apiFetch<any>(`${BASE_URL}/runs/${runId}/sessions/${sessionId}`);
+  return normalizeSession(raw);
+};
 
 /** GET /runs/{runId}/sessions */
 export const fetchManualSessions = async (runId: string): Promise<ManualSessionResponse[]> => {
   const data = await apiFetch<any>(`${BASE_URL}/runs/${runId}/sessions`);
-  return Array.isArray(data) ? data : data?.sessions ?? [];
+  const arr: any[] = Array.isArray(data) ? data : data?.sessions ?? [];
+  return arr.map(normalizeSession);
 };
+
+/** DELETE /runs/{runId}/sessions/{sessionId} */
+export const deleteManualSession = (runId: string, sessionId: string): Promise<void> =>
+  apiFetch<void>(`${BASE_URL}/runs/${runId}/sessions/${sessionId}`, { method: 'DELETE' });
 
 // =============================================================================
 // DISCOVERY
@@ -223,29 +302,6 @@ export const getNodes = async (
   const data = await apiFetch<any>(`${BASE_URL}/nodes/${nodeType}`);
   return Array.isArray(data) ? data : data?.nodes ?? [];
 };
-
-// =============================================================================
-// LEGACY COMPAT (api_manual.ts shims — used by ManualAttackPage)
-// =============================================================================
-
-export const fetchManualConfig = (runId: string) =>
-  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/config`);
-
-export const updateManualConfig = (runId: string, config: any) =>
-  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/config`, {
-    method: 'PUT', body: JSON.stringify(config),
-  });
-
-export const saveSession = (runId: string, sessionId: string, body?: any) =>
-  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}/save`, {
-    method: 'POST', body: JSON.stringify(body ?? {}),
-  });
-
-export const fetchManualStats = (runId: string) =>
-  apiFetch<any>(`${BASE_URL}/runs/${runId}/manual/stats`);
-
-export const deleteManualSession = (runId: string, sessionId: string) =>
-  apiFetch<void>(`${BASE_URL}/runs/${runId}/manual/sessions/${sessionId}`, { method: 'DELETE' });
 
 // Resolves start mode from RunConfig
 export type RunStartMode = 'automatic' | 'manual';
