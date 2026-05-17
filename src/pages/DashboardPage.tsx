@@ -12,7 +12,7 @@ import {
 } from '../services/api';
 import { websocketService } from '../services/websocket';
 
-type RunMode  = 'automatic' | 'manual';
+type RunMode  = 'automatic' | 'manual' | 'batch';
 type WizardStep = 'type' | 'config' | 'review';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -89,6 +89,11 @@ const DashboardPage: React.FC = () => {
 
   // Wizard
   const [wizardStep, setWizardStep] = useState<WizardStep>('type');
+  // Seeded node param defaults (populated when schema loads, sent on create)
+  const [seededAttackParams,   setSeededAttackParams]   = useState<Record<string, any>>({});
+  const [seededDefenseParams,  setSeededDefenseParams]  = useState<Record<string, any>>({});
+  const [seededEvalParams,     setSeededEvalParams]     = useState<Record<string, any>>({});
+  const [seededStrategyParams, setSeededStrategyParams] = useState<Record<string, any>>({});
   const [runMode,    setRunMode]    = useState<RunMode>('automatic');
   const [newName,    setNewName]    = useState('');
   const [newDesc,    setNewDesc]    = useState('');
@@ -154,6 +159,28 @@ const DashboardPage: React.FC = () => {
         if (evalNodes.length > 0 && selectedEvaluationNode === 'none') setSelectedEvaluationNode(evalNodes[0].node_name);
         if (strats.length > 0 && selectedStrategy === 'none') setSelectedStrategy(strats[0].strategy_name);
 
+        // Seed default param values from schemas so they are sent on create
+        // even if the user never touches the sliders
+        const seedSchema = (schema: Record<string, any>) => {
+          const props = schema?.properties ?? {};
+          const out: Record<string, any> = {};
+          for (const [k, def] of Object.entries(props) as [string, any][]) {
+            if (def.default !== undefined) out[k] = def.default;
+            else if (def.enum?.length) out[k] = def.enum[0];
+            else if (def.type === 'boolean') out[k] = false;
+            else if (def.type === 'integer' || def.type === 'number') out[k] = def.minimum ?? 0;
+          }
+          return out;
+        };
+        const atkN  = attackNodes[0];
+        const defN  = defenseNodes[0];
+        const evalN = evalNodes[0];
+        const stratN = strats[0];
+        setSeededAttackParams(atkN   ? seedSchema(atkN.schema_definition   ?? {}) : {});
+        setSeededDefenseParams(defN  ? seedSchema(defN.schema_definition   ?? {}) : {});
+        setSeededEvalParams(evalN    ? seedSchema(evalN.schema_definition  ?? {}) : {});
+        setSeededStrategyParams(stratN ? seedSchema(stratN.schema_definition ?? {}) : {});
+
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -212,10 +239,22 @@ const DashboardPage: React.FC = () => {
     try {
       const runConfig: RunConfig = {
         graph_type:             runMode,
-        attack_node_config:     selectedAttackNode === 'none' ? undefined : { node_type: selectedAttackNode },
-        defense_node_config:    selectedDefenseNode === 'none' ? undefined : { node_type: selectedDefenseNode },
-        evaluation_node_config: selectedEvaluationNode === 'none' ? undefined : { node_type: selectedEvaluationNode },
-        strategy_config:        { strategy_name: selectedStrategy, strategy_params: {} },
+        attack_node_config:     selectedAttackNode === 'none' ? undefined : {
+          node_type:   selectedAttackNode,
+          node_params: seededAttackParams,
+        },
+        defense_node_config:    selectedDefenseNode === 'none' ? undefined : {
+          node_type:   selectedDefenseNode,
+          node_params: seededDefenseParams,
+        },
+        evaluation_node_config: selectedEvaluationNode === 'none' ? undefined : {
+          node_type:   selectedEvaluationNode,
+          node_params: seededEvalParams,
+        },
+        strategy_config: {
+          strategy_name:   selectedStrategy,
+          strategy_params: { ...seededStrategyParams },
+        },
       };
 
       const request: CreateRunRequest = {
@@ -260,6 +299,10 @@ const DashboardPage: React.FC = () => {
     setRunMode('automatic');
     setNewName('');
     setNewDesc('');
+    setSeededAttackParams({});
+    setSeededDefenseParams({});
+    setSeededEvalParams({});
+    setSeededStrategyParams({});
     // Reset node/strategy selections to initial defaults
     // Set initial selections based on defaults or first available
         if (attackNodeTypes.length > 0) setSelectedAttackNode(attackNodeTypes[0].node_name); else setSelectedAttackNode('none');
@@ -423,6 +466,7 @@ const DashboardPage: React.FC = () => {
         .db-mode-btn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:12px 14px;background:#F7F6F3;border:1.5px solid #E8E6E0;border-radius:9px;cursor:pointer;font-family:inherit;transition:all .15s;text-align:left}
         .db-mode-btn.sel-auto{border-color:#1A1A1A;background:#1A1A1A;color:#fff}
         .db-mode-btn.sel-manual{border-color:#4F46E5;background:#EEF2FF;color:#4F46E5}
+        .db-mode-btn.sel-batch{border-color:#7C3AED;background:#F5F3FF;color:#7C3AED}
         .db-mode-icon{font-size:18px;margin-bottom:4px}
         .db-mode-name{font-size:13px;font-weight:600}
         .db-mode-desc{font-size:11px;opacity:.65}
@@ -660,6 +704,11 @@ const DashboardPage: React.FC = () => {
                         <span className="db-mode-name">Manual Attack</span>
                         <span className="db-mode-desc">Human-driven chat sessions</span>
                       </button>
+                      <button className={`db-mode-btn ${runMode === 'batch' ? 'sel-batch' : ''}`} onClick={() => handleModeChange('batch')}>
+                        <span className="db-mode-icon">📦</span>
+                        <span className="db-mode-name">Batch</span>
+                        <span className="db-mode-desc">Upload prompts file (JSON/CSV)</span>
+                      </button>
                     </div>
                   </div>
 
@@ -667,6 +716,12 @@ const DashboardPage: React.FC = () => {
                     <div className="db-callout">
                       <strong>Manual Attack Mode</strong> — you'll type attack messages in a real-time chat UI.
                       Defense evaluation and scoring happen automatically after each turn.
+                    </div>
+                  )}
+                  {runMode === 'batch' && (
+                    <div className="db-callout" style={{ borderColor: '#7C3AED', background: '#F5F3FF' }}>
+                      <strong>Batch Mode</strong> — upload a <code>.json</code> or <code>.csv</code> file containing attack prompts.
+                      The run uses the same automatic pipeline, sourcing prompts from your file instead of the strategy node.
                     </div>
                   )}
                 </>
@@ -735,13 +790,17 @@ const DashboardPage: React.FC = () => {
                   )}
                 </>
               )}
-
               {/* STEP 3: REVIEW */}
               {wizardStep === 'review' && (
                 <div>
                   <div className="db-review-row"><span className="db-review-key">Name</span><span className="db-review-val">{newName}</span></div>
                   {newDesc && <div className="db-review-row"><span className="db-review-key">Description</span><span className="db-review-val">{newDesc}</span></div>}
-                  <div className="db-review-row"><span className="db-review-key">Type</span><span className="db-review-val">{runMode === 'manual' ? '⚔️ Manual Attack' : '🤖 Automatic'}</span></div>
+                  <div className="db-review-row"><span className="db-review-key">Type</span><span className="db-review-val">{runMode === 'manual' ? '⚔️ Manual Attack' : runMode === 'batch' ? '📦 Batch' : '🤖 Automatic'}</span></div>
+                  {runMode === 'batch' && (
+                    <div className="db-callout" style={{ borderColor: '#7C3AED', background: '#F5F3FF', marginTop: 10 }}>
+                      📂 After creating the run, upload your prompts file in the <strong>Strategy</strong> section of the left panel.
+                    </div>
+                  )}
                   {runMode === 'automatic' && (
                     <>
                       <div className="db-review-row"><span className="db-review-key">Attack Node</span><span className="db-review-val">{selectedAttackNode}</span></div>

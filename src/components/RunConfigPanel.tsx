@@ -29,13 +29,140 @@ interface RunConfigPanelProps {
   locked?: boolean;
 }
 
+// ─── File field widget ────────────────────────────────────────────────────────
+
+const FileField: React.FC<{
+  fieldKey:    string;
+  def:         Record<string, any>;
+  values:      Record<string, any>;
+  isReq:       boolean;
+  locked:      boolean;
+  /** Called ONCE with a patch object containing all affected keys */
+  onChangeBatch: (patch: Record<string, any>) => void;
+}> = ({ fieldKey, def, values, isReq, locked, onChangeBatch }) => {
+  const [dragging, setDragging] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const label    = def.title ?? fieldKey.replace(/_/g, ' ');
+  const accept   = def.accept ?? '*';
+  const hasFile  = !!values[fieldKey];
+  const fileName = values[`${fieldKey}_name`] ?? (hasFile ? 'File uploaded' : null);
+
+  const processFile = (file: File) => {
+    if (!file) return;
+    setError(null);
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Strip the data URL prefix → raw base64
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      // Send BOTH fields in one batch so no stale-closure overwrite can happen
+      onChangeBatch({
+        [fieldKey]:               base64,
+        [`${fieldKey}_name`]:     file.name,
+      });
+      setUploading(false);
+    };
+    reader.onerror = () => { setError('Failed to read file'); setUploading(false); };
+    reader.readAsDataURL(file);
+  };
+
+  const clear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChangeBatch({ [fieldKey]: '', [`${fieldKey}_name`]: '' });
+    setError(null);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  return (
+    <div style={S.fieldRow}>
+      <label style={S.fieldLbl}>{label}{isReq && <span style={{ color: '#DC2626' }}> *</span>}</label>
+
+      <div
+        style={{
+          border: `2px dashed ${dragging ? '#7C3AED' : hasFile ? '#22C55E' : error ? '#DC2626' : '#E8E6E0'}`,
+          borderRadius: 8,
+          padding: hasFile ? '10px 12px' : '14px 12px',
+          background: dragging ? '#F5F3FF' : hasFile ? '#F0FDF4' : '#FAFAF9',
+          cursor: locked ? 'default' : 'pointer',
+          transition: 'all .15s',
+          textAlign: 'center' as const,
+        }}
+        onClick={() => { if (!locked) inputRef.current?.click(); }}
+        onDragOver={e => { if (locked) return; e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => {
+          if (locked) return;
+          e.preventDefault(); setDragging(false);
+          const f = e.dataTransfer.files[0];
+          if (f) processFile(f);
+        }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          style={{ display: 'none' }}
+          disabled={locked}
+          onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+        />
+
+        {uploading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: '#888' }}>
+            <svg style={{ animation: 'rcp-spin .7s linear infinite' }} width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="6" cy="6" r="4.5" stroke="#E8E6E0" strokeWidth="1.5"/>
+              <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="#7C3AED" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Reading file…
+          </div>
+        ) : hasFile ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>✅</span>
+            <div style={{ flex: 1, textAlign: 'left' as const, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#15803D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                {fileName}
+              </div>
+              <div style={{ fontSize: 9, color: '#AAA', marginTop: 1 }}>Encoded as base64 · click to replace</div>
+            </div>
+            {!locked && (
+              <button
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14, lineHeight: 1, padding: 2, flexShrink: 0 }}
+                onClick={clear}
+              >✕</button>
+            )}
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 18, marginBottom: 4 }}>📂</div>
+            <div style={{ fontSize: 11, fontWeight: 500, color: '#555' }}>
+              {dragging ? 'Drop file here' : 'Click or drag to upload'}
+            </div>
+            <div style={{ fontSize: 10, color: '#AAA', marginTop: 2 }}>
+              Accepts {accept === '*' ? 'any file' : accept}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {error && <div style={{ fontSize: 10, color: '#DC2626', marginTop: 2 }}>⚠ {error}</div>}
+      {def.description && !hasFile && <div style={S.hint}>{def.description}</div>}
+    </div>
+  );
+};
+
 // ─── Schema field renderer ─────────────────────────────────────────────────────
 
 const SchemaFields: React.FC<{
-  schema: Record<string, any>;
-  values: Record<string, any>;
-  onChange: (key: string, val: any) => void;
-}> = ({ schema, values, onChange }) => {
+  schema:        Record<string, any>;
+  values:        Record<string, any>;
+  locked:        boolean;
+  onChange:      (key: string, val: any) => void;
+  /** Called by file fields to update multiple keys atomically */
+  onChangeBatch: (patch: Record<string, any>) => void;
+}> = ({ schema, values, locked, onChange, onChangeBatch }) => {
   const props    = schema?.properties ?? {};
   const required = schema?.required   ?? [];
   const entries  = Object.entries(props) as [string, any][];
@@ -44,17 +171,33 @@ const SchemaFields: React.FC<{
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {entries.map(([key, def]) => {
-        const val    = values[key] ?? def.default ?? '';
-        const label  = def.title ?? key.replace(/_/g, ' ');
-        const isReq  = required.includes(key);
+        // Skip hidden fields — set programmatically (e.g. prompts_file_name)
+        if (def['ui:widget'] === 'hidden') return null;
+
+        const val   = values[key] ?? def.default ?? '';
+        const label = def.title ?? key.replace(/_/g, ' ');
+        const isReq = required.includes(key);
+
+        // ── File upload widget ──
+        if (def.type === 'file') return (
+          <FileField
+            key={key}
+            fieldKey={key}
+            def={def}
+            values={values}
+            isReq={isReq}
+            locked={locked}
+            onChangeBatch={onChangeBatch}
+          />
+        );
 
         if (def.type === 'boolean') return (
           <div key={key} style={S.fieldRow}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label style={S.fieldLbl}>{label}{isReq && ' *'}</label>
               <label style={S.toggleWrap}>
-                <input type="checkbox" style={{ display: 'none' }} checked={!!val} onChange={e => onChange(key, e.target.checked)} />
-                <span style={{ ...S.toggleSlider, background: val ? '#1A1A1A' : '#E8E6E0' }}>
+                <input type="checkbox" style={{ display: 'none' }} checked={!!val} disabled={locked} onChange={e => onChange(key, e.target.checked)} />
+                <span style={{ ...S.toggleSlider, background: val ? '#1A1A1A' : '#E8E6E0', opacity: locked ? .5 : 1 }}>
                   <span style={{ ...S.toggleDot, transform: val ? 'translateX(16px)' : 'none' }} />
                 </span>
               </label>
@@ -66,7 +209,7 @@ const SchemaFields: React.FC<{
         if (def.enum) return (
           <div key={key} style={S.fieldRow}>
             <label style={S.fieldLbl}>{label}{isReq && ' *'}</label>
-            <select style={S.sel} value={val} onChange={e => onChange(key, e.target.value)}>
+            <select style={{ ...S.sel, opacity: locked ? .6 : 1 }} value={val} disabled={locked} onChange={e => onChange(key, e.target.value)}>
               {def.enum.map((v: string) => <option key={v} value={v}>{v}</option>)}
             </select>
             {def.description && <div style={S.hint}>{def.description}</div>}
@@ -76,7 +219,7 @@ const SchemaFields: React.FC<{
         if (def.type === 'integer' || def.type === 'number') return (
           <div key={key} style={S.fieldRow}>
             <label style={S.fieldLbl}>{label}{isReq && ' *'}</label>
-            <input style={S.inp} type="number" min={def.minimum} max={def.maximum} value={val}
+            <input style={{ ...S.inp, opacity: locked ? .6 : 1 }} type="number" min={def.minimum} max={def.maximum} value={val} disabled={locked}
               onChange={e => onChange(key, def.type === 'integer' ? parseInt(e.target.value) : parseFloat(e.target.value))} />
             {def.description && <div style={S.hint}>{def.description}</div>}
           </div>
@@ -85,7 +228,7 @@ const SchemaFields: React.FC<{
         return (
           <div key={key} style={S.fieldRow}>
             <label style={S.fieldLbl}>{label}{isReq && ' *'}</label>
-            <input style={S.inp} type="text" value={val}
+            <input style={{ ...S.inp, opacity: locked ? .6 : 1 }} type="text" value={val} disabled={locked}
               placeholder={def.examples?.[0] ?? def.default ?? ''}
               onChange={e => onChange(key, e.target.value)} />
             {def.description && <div style={S.hint}>{def.description}</div>}
@@ -208,21 +351,53 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
     setAttackParams(next);
     onParamsChange?.({ attack_node_params: next });
   };
+  const handleAttackChangeBatch = (patch: Record<string, any>) => {
+    if (locked) return;
+    const next = { ...attackParams, ...patch };
+    setAttackParams(next);
+    onParamsChange?.({ attack_node_params: next });
+  };
+
   const handleDefenseChange = (key: string, val: any) => {
     if (locked) return;
     const next = { ...defenseParams, [key]: val };
     setDefenseParams(next);
     onParamsChange?.({ defense_node_params: next });
   };
+  const handleDefenseChangeBatch = (patch: Record<string, any>) => {
+    if (locked) return;
+    const next = { ...defenseParams, ...patch };
+    setDefenseParams(next);
+    onParamsChange?.({ defense_node_params: next });
+  };
+
   const handleEvalChange = (key: string, val: any) => {
     if (locked) return;
     const next = { ...evalParams, [key]: val };
     setEvalParams(next);
     onParamsChange?.({ evaluation_node_params: next });
   };
+  const handleEvalChangeBatch = (patch: Record<string, any>) => {
+    if (locked) return;
+    const next = { ...evalParams, ...patch };
+    setEvalParams(next);
+    onParamsChange?.({ evaluation_node_params: next });
+  };
+
   const handleStrategyChange = (key: string, val: any) => {
     if (locked) return;
     const next = { ...strategyParams, [key]: val };
+    setStrategyParams(next);
+    onParamsChange?.({ strategy_params: next });
+  };
+  /**
+   * Called by FileField with a patch of MULTIPLE keys at once (e.g. prompts_file + prompts_file_name).
+   * Merges into strategyParams in one shot — avoids stale-closure overwrites that occur
+   * when two separate onChange calls each read the old state snapshot.
+   */
+  const handleStrategyChangeBatch = (patch: Record<string, any>) => {
+    if (locked) return;
+    const next = { ...strategyParams, ...patch };
     setStrategyParams(next);
     onParamsChange?.({ strategy_params: next });
   };
@@ -235,6 +410,7 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
 
   const cfg = run.config;
   const isManual = cfg?.graph_type === 'manual';
+  const isBatch  = cfg?.graph_type === 'batch';
 
   const attackNodeName  = cfg?.attack_node_config?.node_type ?? '—';
   const defenseNodeName = cfg?.defense_node_config?.node_type ?? '—';
@@ -264,8 +440,8 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
         <div style={S.runName}>{run.name}</div>
         {run.description && <div style={S.runDesc}>{run.description}</div>}
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-          <span style={{ ...S.pill, background: isManual ? '#EEF2FF' : '#F0FDF4', color: isManual ? '#4F46E5' : '#15803D' }}>
-            {isManual ? '⚔ Manual' : '🤖 Automatic'}
+          <span style={{ ...S.pill, background: isManual ? '#EEF2FF' : isBatch ? '#F5F3FF' : '#F0FDF4', color: isManual ? '#4F46E5' : isBatch ? '#7C3AED' : '#15803D' }}>
+            {isManual ? '⚔ Manual' : isBatch ? '📦 Batch' : '🤖 Automatic'}
           </span>
           <span style={{ ...S.pill, background: '#F0EDE6', color: '#666' }}>
             {run.status}
@@ -301,7 +477,9 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
               <SchemaFields
                 schema={attackSchema}
                 values={attackParams}
+                locked={locked}
                 onChange={handleAttackChange}
+                onChangeBatch={handleAttackChangeBatch}
               />
             </Section>
           // )
@@ -325,7 +503,9 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
               <SchemaFields
                 schema={defenseSchema}
                 values={defenseParams}
+                locked={locked}
                 onChange={handleDefenseChange}
+                onChangeBatch={handleDefenseChangeBatch}
               />
             </Section>
           // )
@@ -348,7 +528,9 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
             <SchemaFields
               schema={evalSchema}
               values={evalParams}
+              locked={locked}
               onChange={handleEvalChange}
+              onChangeBatch={handleEvalChangeBatch}
             />
           </Section>
 
@@ -369,7 +551,9 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
             <SchemaFields
               schema={stratSchema}
               values={strategyParams}
+              locked={locked}
               onChange={handleStrategyChange}
+              onChangeBatch={handleStrategyChangeBatch}
             />
           </Section>
         </>

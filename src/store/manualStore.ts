@@ -13,33 +13,28 @@ interface ManualState {
   sessions:        ChatSession[];
   manualStats:     ManualRunStats | null;
   isSavingSession: boolean;
-  isWaitingForResponse: boolean; // true while a manual turn is processing
+  isWaitingForResponse: boolean;
   manualError:     string | null;
 
-  // Config
   setManualConfig: (config: ManualRunConfig) => void;
 
   // Sessions list
   setSessions:   (sessions: ChatSession[]) => void;
-  addSession:    (session: ChatSession)    => void;
+  // mode: 'prepend' (default, newest on top) | 'append'
+  addSession:    (session: ChatSession, mode?: 'prepend' | 'append') => void;
   updateSession: (sessionId: string, patch: Partial<ChatSession>) => void;
-  removeSession: (sessionId: string)      => void;
+  removeSession: (sessionId: string) => void;
 
   // Active session
   setActiveSession:          (session: ChatSession | null) => void;
   appendTurnToActiveSession: (turn: ChatTurn)              => void;
   updateTurnInActiveSession: (turnId: string, patch: Partial<ChatTurn>) => void;
 
-  // Stats
-  setManualStats: (stats: ManualRunStats) => void;
-
-  // Status flags
-  setIsSavingSession:      (v: boolean)      => void;
-  setIsWaitingForResponse: (v: boolean)      => void;
-  setManualError:          (msg: string | null) => void;
-
-  // Reset
-  resetManualState: () => void;
+  setManualStats:          (stats: ManualRunStats)  => void;
+  setIsSavingSession:      (v: boolean)             => void;
+  setIsWaitingForResponse: (v: boolean)             => void;
+  setManualError:          (msg: string | null)     => void;
+  resetManualState:        ()                       => void;
 }
 
 const defaultState = {
@@ -59,8 +54,12 @@ export const useManualStore = create<ManualState>((set) => ({
 
   setSessions: (sessions) => set({ sessions }),
 
-  addSession: (session) =>
-    set(s => ({ sessions: [session, ...s.sessions] })),
+  addSession: (session, mode = 'prepend') =>
+    set(s => ({
+      sessions: mode === 'prepend'
+        ? [session, ...s.sessions]
+        : [...s.sessions, session],
+    })),
 
   updateSession: (sessionId, patch) =>
     set(s => ({
@@ -82,14 +81,26 @@ export const useManualStore = create<ManualState>((set) => ({
 
   setActiveSession: (session) => set({ activeSession: session }),
 
+  /**
+   * Appends a turn to activeSession.turns AND keeps the matching
+   * entry in the sessions list in sync (turn count + total_turns).
+   */
   appendTurnToActiveSession: (turn) =>
     set(s => {
       if (!s.activeSession) return {};
+      const updatedSession: ChatSession = {
+        ...s.activeSession,
+        turns:       [...s.activeSession.turns, turn],
+        total_turns: s.activeSession.total_turns + 1,
+      };
       return {
-        activeSession: {
-          ...s.activeSession,
-          turns: [...s.activeSession.turns, turn],
-        },
+        activeSession: updatedSession,
+        // Keep the sessions list entry in sync so the sidebar turn count is live
+        sessions: s.sessions.map(sess =>
+          sess.session_id === s.activeSession!.session_id
+            ? { ...sess, total_turns: updatedSession.total_turns, turns: updatedSession.turns }
+            : sess
+        ),
       };
     }),
 
@@ -110,6 +121,5 @@ export const useManualStore = create<ManualState>((set) => ({
   setIsSavingSession:      (isSavingSession)      => set({ isSavingSession }),
   setIsWaitingForResponse: (isWaitingForResponse) => set({ isWaitingForResponse }),
   setManualError:          (manualError)          => set({ manualError }),
-
-  resetManualState: () => set({ ...defaultState }),
+  resetManualState:        ()                     => set({ ...defaultState }),
 }));

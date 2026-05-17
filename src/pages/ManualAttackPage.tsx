@@ -161,22 +161,26 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     (async () => {
       setLoading(true);
       try {
-        const [sess, runStats] = await Promise.all([
+        // Fetch sessions sorted newest-first so order is consistent on reload
+        const [rawSess, runStats] = await Promise.all([
           fetchManualSessions(activeRunId).catch(() => []),
           fetchRunStats(activeRunId).catch(() => null),
         ]);
-        setSessions(sess ?? []);
-        // Map run stats to ManualRunStats shape for the UI stat chips
+        // Sort newest-first by created_at so reload order matches live order
+        const sess = [...(rawSess ?? [])].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setSessions(sess);
         if (runStats) {
           setManualStats({
-            total_sessions:  sess?.length ?? 0,
-            saved_sessions:  0,
-            active_sessions: (sess ?? []).filter((s: any) => s.status === 'active').length,
+            total_sessions:  sess.length,
+            saved_sessions:  sess.filter((s: any) => s.status === 'completed').length,
+            active_sessions: sess.filter((s: any) => s.status === 'active').length,
             breach_count:    runStats.total_evaluations
-              ? Math.round(runStats.success_rate * runStats.total_evaluations)
+              ? Math.round((runStats.success_rate ?? 0) * runStats.total_evaluations)
               : 0,
             blocked_count:   runStats.total_evaluations
-              ? Math.round(runStats.blocked_rate * runStats.total_evaluations)
+              ? Math.round((runStats.blocked_rate ?? 0) * runStats.total_evaluations)
               : 0,
             partial_count:   0,
             average_score:   runStats.average_score,
@@ -198,7 +202,8 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     try {
       const label = newLabel.trim() || `Session ${sessions.length + 1}`;
       const sess  = await createManualSession(activeRunId, { name: label, description: newDesc.trim() || undefined });
-      addSession(sess);
+      // Prepend so newest is always at top — consistent with reload sort order
+      addSession(sess, 'prepend');
       setActiveSession(sess);
       setNewLabel('');
       setNewDesc('');
@@ -213,14 +218,11 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     setLoadingHistory(true);
     try {
       const history = await getManualSessionHistory(activeRunId!, sess.session_id);
-      // Assemble ChatTurn[] from raw typed records per API contract:
-      // attack_data.prompt → role 'attacker'
-      // defence_data.response → role 'defense'
-      // evaluation_data.feedback → role 'evaluation'
-      const assembledTurns: ChatTurn[] = [];
-      for (const raw of history.turns) {
+      // Assemble ChatTurn[] from raw typed records per API contract
+      const assembled: ChatTurn[] = [];
+      for (const raw of (history.turns ?? [])) {
         if (raw.attack_data) {
-          assembledTurns.push({
+          assembled.push({
             turn_id:   `atk-${raw.turn_id}`,
             role:      'attacker',
             content:   raw.attack_data.metadata?.user_input ?? raw.attack_data.prompt,
@@ -229,17 +231,17 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
           });
         }
         if (raw.defence_data) {
-          assembledTurns.push({
+          assembled.push({
             turn_id:   `def-${raw.turn_id}`,
             role:      'defense',
             content:   raw.defence_data.response,
             timestamp: raw.defence_data.timestamp,
-            metadata:  { was_blocked: raw.defence_data.was_blocked, ...raw.defence_data.metadata },
+            metadata:  { was_blocked: raw.defence_data.was_blocked, blocked_by: raw.defence_data.metadata?.blocked_by, attack_type: raw.defence_data.metadata?.attack_type },
           });
         }
         if (raw.evaluation_data) {
           const label = raw.evaluation_data.success ? 'breached' : 'blocked';
-          assembledTurns.push({
+          assembled.push({
             turn_id:   `eval-${raw.turn_id}`,
             role:      'evaluation',
             content:   raw.evaluation_data.feedback,
@@ -250,7 +252,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
       }
       const full: ChatSession = {
         ...history.session,
-        turns: assembledTurns,
+        turns: assembled,
       };
       updateSession(sess.session_id, full);
       setActiveSession(full);
@@ -273,23 +275,15 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     } catch (e: any) { setManualError(e.message); }
   };
 
-  // ── Send turn (this is the "start" for manual mode) ──────────────────────────
-  // Sending a message triggers one full Attack→Defense→Eval cycle.
-  // The backend uses session context for multi-turn continuity.
+  // ── Send turn ────────────────────────────────────────────────────────────────
+  // DO NOT add an optimistic attacker bubble here.
+  // The backend echoes it back via manual_attack_generated WS event.
+  // Adding it here AND relying on WS causes double messages.
   const handleSend = async () => {
     if (!canSend || !activeRunId || !activeSession) return;
     const content = input.trim();
     setInput('');
     setIsWaitingForResponse(true);
-
-    // Optimistic attacker bubble
-    appendTurnToActiveSession({
-      turn_id:   `opt-${Date.now()}`,
-      role:      'attacker',
-      content,
-      timestamp: new Date().toISOString(),
-      metadata:  { user_input: content },
-    });
 
     try {
       await submitManualTurn(activeRunId, activeSession.session_id, { prompt: content });
@@ -306,23 +300,15 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
   };
 
   // ── Save & evaluate ───────────────────────────────────────────────────────────
-  // Note: The API v2 contract does not have a dedicated "save session" endpoint.
-  // Sessions are managed via WebSocket events (run_idle, manual_evaluation_complete).
-  // This handler closes the modal and marks the session as completed locally.
   const handleSaveSession = async () => {
     if (!activeRunId || !activeSession || isSavingSession) return;
     setIsSavingSession(true);
     try {
-      // Locally mark as completed — the evaluation results are already in the
-      // turns array from manual_evaluation_complete WS events.
-      const patch = {
-        status: 'completed' as const,
-      };
+      const patch = { status: 'completed' as const };
       updateSession(activeSession.session_id, patch);
       setActiveSession({ ...activeSession, ...patch });
       setShowSaveModal(false);
       setSaveLabelInput('');
-      // Refresh run stats
       const runStats = await fetchRunStats(activeRunId).catch(() => null);
       if (runStats) {
         const sess = sessions;
@@ -331,11 +317,9 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
           saved_sessions:  sess.filter(s => s.status === 'completed').length + 1,
           active_sessions: sess.filter(s => s.status === 'active').length,
           breach_count:    runStats.total_evaluations
-            ? Math.round(runStats.success_rate * runStats.total_evaluations)
-            : 0,
+            ? Math.round((runStats.success_rate ?? 0) * runStats.total_evaluations) : 0,
           blocked_count:   runStats.total_evaluations
-            ? Math.round(runStats.blocked_rate * runStats.total_evaluations)
-            : 0,
+            ? Math.round((runStats.blocked_rate ?? 0) * runStats.total_evaluations) : 0,
           partial_count:   0,
           average_score:   runStats.average_score,
         });
@@ -355,7 +339,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif", overflow: 'hidden' }}>
       <style>{`
         @keyframes man-spin { to { transform: rotate(360deg); } }
         .man-spin { animation: man-spin .7s linear infinite; }
@@ -463,7 +447,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
                         {sess.name || sess.session_id.slice(-8)}
                       </div>
                       <div style={{ fontSize: 10, color: '#AAA', marginTop: 2 }}>
-                        {sess.total_turns} turn{sess.total_turns !== 1 ? 's' : ''} · {new Date(sess.created_at).toLocaleDateString()}
+                        {sess.turns.length > 0 ? sess.turns.length : sess.total_turns} turn{(sess.turns.length || sess.total_turns) !== 1 ? 's' : ''} · {new Date(sess.created_at).toLocaleDateString()}
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
@@ -616,7 +600,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
               <label style={{ fontSize: 10, fontWeight: 500, color: '#999', textTransform: 'uppercase', letterSpacing: '.4px' }}>Session Label (optional)</label>
               <input
                 style={{ height: 32, background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 7, padding: '0 10px', fontSize: 12, fontFamily: 'inherit', color: '#1A1A1A', outline: 'none' }}
-                // placeholder={activeSession?.label ?? 'e.g. SQL injection attempt'}
+                placeholder={activeSession?.description ?? 'e.g. SQL injection attempt'}
                 value={saveLabelInput}
                 onChange={e => setSaveLabelInput(e.target.value)}
                 autoFocus

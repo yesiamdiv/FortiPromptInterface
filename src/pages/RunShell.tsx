@@ -23,8 +23,8 @@ const VALID_TABS: RunTab[] = ['attack', 'defense', 'evaluation', 'manual'];
 function getAvailableTabs(run: any): RunTab[] {
   if (!run) return ['attack'];
   if (run.config?.graph_type === 'manual') return ['manual'];
-  const tabs: RunTab[] = ['attack', 'defense', 'evaluation'];
-  return tabs;
+  // batch uses the same automatic tabs
+  return ['attack', 'defense', 'evaluation'];
 }
 
 const TAB_META: Record<RunTab, { label: string; icon: React.ReactNode; activeColor: string }> = {
@@ -82,118 +82,105 @@ const RunShell: React.FC = () => {
       setActiveRun(runId);
     }
 
-    // Always fetch fresh run metadata
-    const runFetch = fetchRun(runId)
-      .then(r => { addRun(r); return r; })
-      .catch(() => null);
-
-    // Hydrate attack/defence/evaluation data so pages aren't blank on open.
-    // This covers: completed runs, failed runs, runs that were running before
-    // page reload, and any run the user navigates to directly via URL.
-    // We clear first so stale data from a previous run doesn't bleed in.
+    // Clear stale data from any previously viewed run before fetching fresh
     clearAttackPrompts();
     clearDefenseResponses();
     clearEvalResults();
 
     const hydrateData = async () => {
-      const run = await runFetch;
-      if (!run) return;
+      // Always fetch fresh run metadata first so we know graph_type + status
+      let run: any = null;
+      try {
+        run = await fetchRun(runId);
+        addRun(run);
+      } catch { /* run not found — leave nav showing stale from store */ }
 
-      // For manual runs: ManualAttackPage handles its own session hydration.
-      // For automatic (and completed/failed manual): hydrate attack/defence/eval.
-      const isManualRun = run.config?.graph_type === 'manual';
-
-      // Lock config panel if the run is actively running
-      if (run.status === 'running') {
+      // Reflect live run status in nav + lock state immediately
+      if (run?.status === 'running') {
         setIsRunLocked(true);
         setIsAttacking(true);
       }
 
-      if (!isManualRun) {
-        // Fetch all three data types in parallel; each is a no-op on empty runs
-        const [attacks, defences, evaluations, stats] = await Promise.allSettled([
-          fetchRunAttacks(runId),
-          fetchRunDefences(runId),
-          fetchRunEvaluations(runId),
-          fetchRunStats(runId),
-        ]);
+      // Manual runs: ManualAttackPage fetches its own sessions/history
+      const isManualRun = run?.config?.graph_type === 'manual';
+      if (!run || isManualRun) return;
 
-        // Populate attack prompts
-        if (attacks.status === 'fulfilled') {
-          for (const a of attacks.value) {
-            addAttackPrompt({
-              promptId:  a.turn_id,
-              content:   a.prompt,
-              status:    'generated',
-              timestamp: a.timestamp ?? new Date().toISOString(),
-              metadata:  a.metadata ?? {},
-            });
-          }
-        }
+      // Fetch attack, defence, evaluation data + stats in parallel
+      const [attacks, defences, evaluations, stats] = await Promise.allSettled([
+        fetchRunAttacks(runId),
+        fetchRunDefences(runId),
+        fetchRunEvaluations(runId),
+        fetchRunStats(runId),
+      ]);
 
-        // Populate defense responses
-        if (defences.status === 'fulfilled') {
-          for (const d of defences.value) {
-            addDefenseResponse({
-              promptId:        d.turn_id,
-              defenseResponse: d.response,
-              evaluation:      d.was_blocked ? 'blocked' : 'passed',
-              was_blocked:     d.was_blocked ?? false,
-              blocked_by:      d.metadata?.blocked_by,
-              attack_type:     d.metadata?.attack_type,
-              timestamp:       d.timestamp ?? new Date().toISOString(),
-            });
-          }
-        }
-
-        // Populate eval results — cross-join with attacks/defences for context
-        if (evaluations.status === 'fulfilled') {
-          const attackMap  = attacks.status  === 'fulfilled' ? Object.fromEntries(attacks.value.map((a: any)  => [a.turn_id, a]))  : {};
-          const defenceMap = defences.status === 'fulfilled' ? Object.fromEntries(defences.value.map((d: any) => [d.turn_id, d])) : {};
-
-          for (const e of evaluations.value) {
-            const matchedAttack  = attackMap[e.turn_id];
-            const matchedDefence = defenceMap[e.turn_id];
-            addEvalResult({
-              evalId:        e.turn_id,
-              promptId:      e.turn_id,
-              verdict:       e.success ? 'breach' : 'defended',
-              score:         e.score ?? 0,
-              reasoning:     e.feedback ?? '',
-              timestamp:     e.timestamp ?? new Date().toISOString(),
-              attackContent:  matchedAttack?.prompt,
-              defenseContent: matchedDefence?.response,
-              was_blocked:    matchedDefence?.was_blocked,
-              attack_type:    matchedDefence?.metadata?.attack_type,
-            });
-          }
-        }
-
-        // Populate eval stats from the /stats endpoint
-        if (stats.status === 'fulfilled') {
-          const s = stats.value;
-          const total = s.total_evaluations ?? 0;
-          setEvalStats({
-            total,
-            breaches:     total ? Math.round(s.success_rate  * total) : 0,
-            defended:     total ? Math.round((1 - s.success_rate - (s.blocked_rate ?? 0)) * total) : 0,
-            partial:      0,
-            averageScore: s.average_score ?? 0,
-            breachRate:   s.success_rate  ?? 0,
-          });
-          setDefenseStats({
-            totalResponses:      s.total_defences ?? 0,
-            blockedCount:        total ? Math.round((s.blocked_rate ?? 0) * total) : 0,
-            passedCount:         total ? total - Math.round((s.blocked_rate ?? 0) * total) : 0,
-            overallDefenseScore: s.blocked_rate != null ? Math.round(s.blocked_rate * 100) : 0,
+      if (attacks.status === 'fulfilled') {
+        for (const a of attacks.value) {
+          addAttackPrompt({
+            promptId:  a.turn_id,
+            content:   a.prompt,
+            status:    'generated',
+            timestamp: a.timestamp ?? new Date().toISOString(),
+            metadata:  a.metadata ?? {},
           });
         }
+      }
+
+      if (defences.status === 'fulfilled') {
+        for (const d of defences.value) {
+          addDefenseResponse({
+            promptId:        d.turn_id,
+            defenseResponse: d.response,
+            evaluation:      d.was_blocked ? 'blocked' : 'passed',
+            was_blocked:     d.was_blocked ?? false,
+            blocked_by:      d.metadata?.blocked_by,
+            attack_type:     d.metadata?.attack_type,
+            timestamp:       d.timestamp ?? new Date().toISOString(),
+          });
+        }
+      }
+
+      if (evaluations.status === 'fulfilled') {
+        const attackMap  = attacks.status  === 'fulfilled' ? Object.fromEntries(attacks.value.map((a: any)  => [a.turn_id, a]))  : {};
+        const defenceMap = defences.status === 'fulfilled' ? Object.fromEntries(defences.value.map((d: any) => [d.turn_id, d])) : {};
+        for (const e of evaluations.value) {
+          addEvalResult({
+            evalId:         e.turn_id,
+            promptId:       e.turn_id,
+            verdict:        e.success ? 'breach' : 'defended',
+            score:          e.score ?? 0,
+            reasoning:      e.feedback ?? '',
+            timestamp:      e.timestamp ?? new Date().toISOString(),
+            attackContent:  (attackMap as any)[e.turn_id]?.prompt,
+            defenseContent: (defenceMap as any)[e.turn_id]?.response,
+            was_blocked:    (defenceMap as any)[e.turn_id]?.was_blocked,
+            attack_type:    (defenceMap as any)[e.turn_id]?.metadata?.attack_type,
+          });
+        }
+      }
+
+      if (stats.status === 'fulfilled') {
+        const s = stats.value;
+        const total = s.total_evaluations ?? 0;
+        setEvalStats({
+          total,
+          breaches:     total ? Math.round((s.success_rate  ?? 0) * total) : 0,
+          defended:     total ? total - Math.round((s.success_rate ?? 0) * total) : 0,
+          partial:      0,
+          averageScore: s.average_score ?? 0,
+          breachRate:   s.success_rate  ?? 0,
+        });
+        setDefenseStats({
+          totalResponses:      s.total_defences ?? 0,
+          blockedCount:        total ? Math.round((s.blocked_rate ?? 0) * total) : 0,
+          passedCount:         total ? total - Math.round((s.blocked_rate ?? 0) * total) : 0,
+          overallDefenseScore: s.blocked_rate != null ? Math.round(s.blocked_rate * 100) : 0,
+        });
       }
     };
 
     hydrateData();
 
-    // Join the WS run room for live events
+    // Join the WS run room — live events will keep status + data up to date
     websocketService.joinRun(runId);
     return () => { websocketService.leaveRun(runId); };
   }, [runId]);
@@ -201,6 +188,7 @@ const RunShell: React.FC = () => {
   const run           = runs.find(r => r.runid === runId);
   const availableTabs = getAvailableTabs(run);
   const isManual      = run?.config?.graph_type === 'manual';
+  const isBatch       = run?.config?.graph_type === 'batch';
 
   // Resolve active tab
   const activeTab: RunTab = (() => {
@@ -235,8 +223,17 @@ const RunShell: React.FC = () => {
   }, [pendingUpdate, runId, isRunLocked]);
 
   const handleParamsChange = useCallback((update: UpdateRunRequest) => {
-    if (isRunLocked) return; // ignore changes while running
-    setPendingUpdate(prev => ({ ...prev, ...update }));
+    if (isRunLocked) return;
+    setPendingUpdate(prev => {
+      if (!prev) return update;
+      // Deep-merge each params key so a second call never drops keys from the first
+      const merged: UpdateRunRequest = { ...prev };
+      if (update.strategy_params)         merged.strategy_params         = { ...(prev.strategy_params ?? {}),         ...update.strategy_params };
+      if (update.attack_node_params)      merged.attack_node_params      = { ...(prev.attack_node_params ?? {}),      ...update.attack_node_params };
+      if (update.defense_node_params)     merged.defense_node_params     = { ...(prev.defense_node_params ?? {}),     ...update.defense_node_params };
+      if (update.evaluation_node_params)  merged.evaluation_node_params  = { ...(prev.evaluation_node_params ?? {}),  ...update.evaluation_node_params };
+      return merged;
+    });
   }, [isRunLocked]);
 
   // ── Start Run (automatic only) ────────────────────────────────────────────────
@@ -435,7 +432,7 @@ const S: Record<string, React.CSSProperties> = {
   tabBtn:     { display: 'flex', alignItems: 'center', gap: 5, padding: '0 14px', height: 52, fontSize: 12, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', border: 'none', borderBottom: '2px solid transparent', background: 'transparent', transition: 'all .15s', whiteSpace: 'nowrap' as const },
   body:       { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
   panel:      { width: 280, flexShrink: 0, borderRight: '1px solid #E8E6E0', background: '#fff', overflowY: 'auto' as const, height: 'calc(100vh - 52px)' },
-  content:    { flex: 1, overflow: 'auto', minWidth: 0 },
+  content:    { flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' },
 };
 
 export default RunShell;

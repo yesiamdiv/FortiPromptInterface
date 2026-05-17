@@ -24,7 +24,7 @@ export interface StrategyConfig {
 }
 
 export interface RunConfig {
-  graph_type: 'automatic' | 'manual';
+  graph_type: 'automatic' | 'manual' | 'batch';
   attack_node_config?: AttackNodeConfig;
   defense_node_config?: DefenseNodeConfig;
   evaluation_node_config?: EvaluationNodeConfig;
