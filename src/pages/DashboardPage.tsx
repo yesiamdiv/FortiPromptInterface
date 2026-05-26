@@ -22,7 +22,7 @@ const STATUS_STYLES: Record<string, { bg: string; color: string }> = {
   running:   { bg: '#DBEAFE', color: '#1D4ED8' },
   completed: { bg: '#F0FDF4', color: '#15803D' },
   failed:    { bg: '#FEF2F2', color: '#DC2626' },
-  paused:    { bg: '#FEF9C3', color: '#92400E' },
+  stopped:    { bg: '#FEF9C3', color: '#92400E' },
 };
 
 const COMP_STYLES: Record<ComponentType, { bg: string; color: string; border: string }> = {
@@ -788,7 +788,7 @@ const DashboardPage: React.FC = () => {
                       </div>
                     </>
                   )}
-                </>
+                  </>
               )}
               {/* STEP 3: REVIEW */}
               {wizardStep === 'review' && (

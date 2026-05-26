@@ -158,15 +158,43 @@ class WebSocketService {
     // Suggested new backend events — see API_DOCS.md for implementation spec.
 
     s.on('evaluation_result', (data: WSEvalResult) => {
-      const { addEvalResult, activeRunId } = useAppStore.getState();
+      const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
+      // Cross-join with already-stored attack prompt and defense response
+      const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
+      const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
       addEvalResult({
-        evalId:    data.turn_id,
-        promptId:  data.turn_id,
-        verdict:   data.evaluation.success ? 'breach' : 'defended',
-        score:     data.evaluation.score ?? 0,
-        reasoning: data.evaluation.reasoning ?? '',
-        timestamp: data.evaluation.timestamp ?? new Date().toISOString(),
+        evalId:         data.turn_id,
+        promptId:       data.turn_id,
+        verdict:        data.evaluation.success ? 'breach' : 'defended',
+        score:          data.evaluation.score ?? 0,
+        reasoning:      data.evaluation.reasoning ?? '',
+        timestamp:      data.evaluation.timestamp ?? new Date().toISOString(),
+        attackContent:  matchedAttack?.content,
+        defenseContent: matchedDefence?.defenseResponse,
+        was_blocked:    matchedDefence?.was_blocked,
+        attack_type:    matchedDefence?.attack_type,
+      });
+    });
+
+    // Also listen under the alternate event name the backend may use
+    s.on('evaluation_complete', (data: WSEvalResult) => {
+      const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
+      if (activeRunId !== data.run_id) return;
+      if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
+      const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
+      const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
+      addEvalResult({
+        evalId:         data.turn_id,
+        promptId:       data.turn_id,
+        verdict:        data.evaluation.success ? 'breach' : 'defended',
+        score:          data.evaluation.score ?? 0,
+        reasoning:      data.evaluation.reasoning ?? '',
+        timestamp:      data.evaluation.timestamp ?? new Date().toISOString(),
+        attackContent:  matchedAttack?.content,
+        defenseContent: matchedDefence?.defenseResponse,
+        was_blocked:    matchedDefence?.was_blocked,
+        attack_type:    matchedDefence?.attack_type,
       });
     });
 

@@ -1,8 +1,4 @@
 // pages/EvaluationPage.tsx
-// Evaluation node results: breach/defended verdict per attack-defense cycle.
-// Clicking a row expands to show the original attack prompt + defense response.
-// Stats: total, breaches, defended, partial, breach rate, avg score.
-
 import React, { useState } from 'react';
 import { BarChart2, ChevronDown, ChevronRight, Zap, Shield, AlertTriangle } from 'lucide-react';
 import { EvalResult, EvalVerdict } from '../types';
@@ -24,33 +20,44 @@ const ScoreBar: React.FC<{ score: number; verdict: EvalVerdict }> = ({ score, ve
       <div style={{ flex: 1, height: 3, background: '#F0EDE6', borderRadius: 2 }}>
         <div style={{ width: `${width}%`, height: '100%', background: cfg.dot, borderRadius: 2, transition: 'width .3s' }}/>
       </div>
-      <span style={{ fontSize: 10, fontFamily: 'DM Mono,monospace', color: cfg.color, minWidth: 28, textAlign: 'right' }}>
+      <span style={{ fontSize: 10, fontFamily: 'DM Mono,monospace', color: cfg.color, minWidth: 28, textAlign: 'right' as const }}>
         {width}%
       </span>
     </div>
   );
 };
 
-const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => {
-  const evalResults    = useAppStore(s => s.evalResults);
-  const evalStats      = useAppStore(s => s.evalStats);
-  const isAttacking    = useAppStore(s => s.isAttacking);
+const EvaluationPage: React.FC<EvaluationPageProps> = () => {
+  const evalResults      = useAppStore(s => s.evalResults);
+  const evalStats        = useAppStore(s => s.evalStats);
+  const isAttacking      = useAppStore(s => s.isAttacking);
   const clearEvalResults = useAppStore(s => s.clearEvalResults);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Derive stats from local results if WS stats haven't arrived yet
-  const total    = evalStats?.total    ?? evalResults.length;
-  const breaches = evalStats?.breaches ?? evalResults.filter(r => r.verdict === 'breach').length;
-  const defended = evalStats?.defended ?? evalResults.filter(r => r.verdict === 'defended').length;
-  const partial  = evalStats?.partial  ?? evalResults.filter(r => r.verdict === 'partial').length;
-  const avgScore = evalStats?.averageScore ?? (evalResults.length > 0 ? evalResults.reduce((a, r) => a + r.score, 0) / evalResults.length : null);
-  const breachRate = total > 0 ? Math.round((breaches / total) * 100) : null;
+  // Always derive stats from both the server-sent stats and the local store items.
+  // Server stats are authoritative when present; fall back to counting store items.
+  // This ensures numbers are never stale whether live or after reload.
+  const localBreaches = evalResults.filter(r => r.verdict === 'breach').length;
+  const localDefended = evalResults.filter(r => r.verdict === 'defended').length;
+  const localPartial  = evalResults.filter(r => r.verdict === 'partial').length;
+  const localTotal    = evalResults.length;
+  const localAvg      = localTotal > 0
+    ? evalResults.reduce((a, r) => a + r.score, 0) / localTotal
+    : null;
 
+  const total      = evalStats?.total    ?? localTotal;
+  const breaches   = evalStats?.breaches ?? localBreaches;
+  const defended   = evalStats?.defended ?? localDefended;
+  const partial    = evalStats?.partial  ?? localPartial;
+  const avgScore   = evalStats?.averageScore ?? localAvg;
+  const breachRate = total > 0 ? Math.round((breaches / total) * 100) : null;
   const breachRateColor = breachRate == null ? '#CCC' : breachRate <= 20 ? '#22C55E' : breachRate <= 50 ? '#F59E0B' : '#EF4444';
 
+  const displayed = [...evalResults].reverse();
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif", overflow: 'hidden' }}>
       <style>{`
         @keyframes ev-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
         @keyframes ev-spin  { to{transform:rotate(360deg)} }
@@ -59,7 +66,7 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
       `}</style>
 
       {/* ── Header ── */}
-      <div style={{ padding: '20px 24px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+      <div style={{ padding: '20px 24px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-.3px', display: 'flex', alignItems: 'center', gap: 8 }}>
             Evaluation Results
@@ -83,22 +90,23 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
         )}
       </div>
 
-      {/* ── Section 1: Stat chips ── */}
-      <div style={{ padding: '16px 24px 0' }}>
+      {/* ── Stat chips ── */}
+      <div style={{ padding: '16px 24px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {[
-            { label: 'Total',    val: total    > 0 ? String(total)    : '—', color: '#1A1A1A' },
-            { label: 'Breaches', val: total    > 0 ? String(breaches) : '—', color: '#DC2626' },
-            { label: 'Defended', val: total    > 0 ? String(defended) : '—', color: '#15803D' },
-            { label: 'Partial',  val: total    > 0 ? String(partial)  : '—', color: '#B45309' },
+            { label: 'Total',    val: String(total),    color: '#1A1A1A' },
+            { label: 'Breaches', val: String(breaches), color: '#DC2626' },
+            { label: 'Defended', val: String(defended), color: '#15803D' },
+            { label: 'Partial',  val: String(partial),  color: '#B45309' },
           ].map(({ label, val, color }) => (
             <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-              <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color }}>{val}</span>
+              <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: total > 0 ? color : '#DDD' }}>
+                {total > 0 ? val : '—'}
+              </span>
               <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
             </div>
           ))}
 
-          {/* Breach rate chip */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: `1px solid ${breachRate != null ? breachRateColor + '50' : '#E8E6E0'}`, borderRadius: 8 }}>
             <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: breachRateColor }}>
               {breachRate != null ? `${breachRate}%` : '—'}
@@ -106,7 +114,6 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
             <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Breach Rate</span>
           </div>
 
-          {/* Avg score chip */}
           {avgScore != null && (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
               <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: '#555' }}>
@@ -117,7 +124,6 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
           )}
         </div>
 
-        {/* Breach rate bar */}
         {total > 0 && (
           <div style={{ marginTop: 10, height: 4, background: '#F0FDF4', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{ display: 'flex', height: '100%' }}>
@@ -129,9 +135,8 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
         )}
       </div>
 
-      {/* ── Section 2: Results list ── */}
+      {/* ── Results list (scrollable) ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>
-        {/* List header */}
         <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #F0EDE6', flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>Cycle Results</span>
           <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#BBB' }}>
@@ -144,7 +149,7 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
           </span>
         </div>
 
-        {evalResults.length === 0 ? (
+        {displayed.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#CCC' }}>
             {isAttacking ? (
               <>
@@ -166,53 +171,47 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {evalResults.slice().reverse().map((r: EvalResult, i: number) => {
+            {displayed.map((r: EvalResult, i: number) => {
               const cfg   = VERDICT_CFG[r.verdict] ?? VERDICT_CFG.partial;
               const isExp = expandedId === r.evalId;
+              const hasContent = !!(r.attackContent || r.defenseContent);
               return (
-                <div key={r.evalId} className="ev-row" style={{ borderBottom: '1px solid #F9F8F6', cursor: 'pointer', transition: 'background .1s' }}>
-                  {/* Main row */}
+                <div key={r.evalId} className="ev-row" style={{ borderBottom: '1px solid #F9F8F6', cursor: hasContent ? 'pointer' : 'default', transition: 'background .1s' }}>
                   <div
                     style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px' }}
-                    onClick={() => setExpandedId(isExp ? null : r.evalId)}
+                    onClick={() => hasContent && setExpandedId(isExp ? null : r.evalId)}
                   >
-                    {/* Index */}
                     <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0, minWidth: 20 }}>
-                      {String(evalResults.length - i).padStart(2, '0')}
+                      {String(displayed.length - i).padStart(2, '0')}
                     </span>
 
-                    {/* Verdict badge */}
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 20, fontSize: 10, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, flexShrink: 0 }}>
                       {cfg.icon}{cfg.label}
                     </span>
 
-                    {/* Score bar */}
                     <div style={{ flex: 1 }}>
                       <ScoreBar score={r.score} verdict={r.verdict} />
                     </div>
 
-                    {/* Reasoning snippet */}
                     <div style={{ fontSize: 11, color: '#888', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       {r.reasoning}
                     </div>
 
-                    {/* Time */}
                     <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0 }}>
                       {new Date(r.timestamp).toLocaleTimeString()}
                     </span>
 
-                    {/* Expand chevron */}
-                    <span style={{ color: '#CCC', flexShrink: 0, display: 'flex' }}>
-                      {isExp ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
-                    </span>
+                    {hasContent && (
+                      <span style={{ color: '#CCC', flexShrink: 0, display: 'flex' }}>
+                        {isExp ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Expanded: attack prompt + defense response + full reasoning */}
                   {isExp && (
                     <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {/* Full reasoning */}
                       {r.reasoning && (
-                        <div style={{ fontSize: 12, color: '#555', lineHeight: 1.6, padding: '10px 12px', background: `${cfg.bg}`, border: `1px solid ${cfg.border}`, borderRadius: 8 }}>
+                        <div style={{ fontSize: 12, color: '#555', lineHeight: 1.6, padding: '10px 12px', background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 8 }}>
                           <div style={{ fontSize: 10, fontWeight: 600, color: cfg.color, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '.3px' }}>
                             Evaluator Reasoning
                           </div>
@@ -220,8 +219,7 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
                         </div>
                       )}
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        {/* Attack prompt */}
+                      <div style={{ display: 'grid', gridTemplateColumns: r.attackContent && r.defenseContent ? '1fr 1fr' : '1fr', gap: 10 }}>
                         {r.attackContent && (
                           <div style={{ padding: '10px 12px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8 }}>
                             <div style={{ fontSize: 10, fontWeight: 600, color: '#DC2626', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4, textTransform: 'uppercase', letterSpacing: '.3px' }}>
@@ -233,12 +231,11 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
                           </div>
                         )}
 
-                        {/* Defense response */}
                         {r.defenseContent && (
                           <div style={{ padding: '10px 12px', background: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: 8 }}>
                             <div style={{ fontSize: 10, fontWeight: 600, color: '#15803D', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4, textTransform: 'uppercase', letterSpacing: '.3px' }}>
                               <Shield size={9}/> Defense Response
-                              {r.was_blocked && <span style={{ fontWeight: 400, color: '#888', textTransform: 'none' }}>· Blocked</span>}
+                              {r.was_blocked && <span style={{ fontWeight: 400, color: '#888', textTransform: 'none' as const }}>· Blocked</span>}
                             </div>
                             <div style={{ fontFamily: 'DM Mono,monospace', fontSize: 11, color: '#555', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                               {r.defenseContent}
@@ -247,7 +244,6 @@ const EvaluationPage: React.FC<EvaluationPageProps> = ({ embedded = false }) => 
                         )}
                       </div>
 
-                      {/* Attack type if known */}
                       {r.attack_type && (
                         <div style={{ fontSize: 11, color: '#888' }}>
                           Detected attack type: <span style={{ fontWeight: 500, color: '#555' }}>{r.attack_type}</span>

@@ -1,8 +1,4 @@
 // pages/DefenseTestingPage.tsx
-// Shows defense system responses only — no start button, no filter config.
-// RunShell owns the start/stop. RunConfigPanel owns filter config.
-// Two sections: 1) stat chips  2) scrollable response feed
-
 import React, { useState } from 'react';
 import { Shield, AlertTriangle } from 'lucide-react';
 import { DefenseResponse, DefenseEvaluation } from '../types';
@@ -11,12 +7,12 @@ import { useAppStore } from '../store/appStore';
 interface DefenseTestingPageProps { embedded?: boolean; }
 
 const EVAL_CFG: Record<DefenseEvaluation, { label: string; bg: string; color: string; border: string }> = {
-  blocked:      { label: 'Blocked',      bg: '#F0FDF4', color: '#15803D', border: '#86EFAC' },
-  passed:       { label: 'Passed',       bg: '#FEF2F2', color: '#DC2626', border: '#FCA5A5' },
-  failed_filter:{ label: 'Filter Miss',  bg: '#FFFBEB', color: '#B45309', border: '#FCD34D' },
+  blocked:      { label: 'Blocked',     bg: '#F0FDF4', color: '#15803D', border: '#86EFAC' },
+  passed:       { label: 'Passed',      bg: '#FEF2F2', color: '#DC2626', border: '#FCA5A5' },
+  failed_filter:{ label: 'Filter Miss', bg: '#FFFBEB', color: '#B45309', border: '#FCD34D' },
 };
 
-const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = false }) => {
+const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
   const defenseResponses      = useAppStore(s => s.defenseResponses);
   const defenseStats          = useAppStore(s => s.defenseStats);
   const isEvaluating          = useAppStore(s => s.isEvaluating);
@@ -26,14 +22,18 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = fals
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const total   = defenseStats?.totalResponses ?? 0;
-  const blocked = defenseStats?.blockedCount   ?? 0;
-  const passed  = defenseStats?.passedCount    ?? 0;
-  const score   = defenseStats?.overallDefenseScore ?? null;
+  // Derive stats from the store when WS stats haven't arrived yet
+  const total   = defenseStats?.totalResponses ?? defenseResponses.length;
+  const blocked = defenseStats?.blockedCount   ?? defenseResponses.filter(r => r.was_blocked).length;
+  const passed  = defenseStats?.passedCount    ?? defenseResponses.filter(r => !r.was_blocked).length;
+  const score   = defenseStats?.overallDefenseScore
+    ?? (defenseResponses.length > 0 ? Math.round((defenseResponses.filter(r => r.was_blocked).length / defenseResponses.length) * 100) : null);
   const scoreColor = score == null ? '#CCC' : score >= 85 ? '#22C55E' : score >= 65 ? '#F59E0B' : '#EF4444';
 
+  const displayed = [...defenseResponses].reverse();
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif", overflow: 'hidden' }}>
       <style>{`
         @keyframes df-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
         @keyframes df-spin  { to{transform:rotate(360deg)} }
@@ -42,7 +42,7 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = fals
       `}</style>
 
       {/* ── Header ── */}
-      <div style={{ padding: '20px 24px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+      <div style={{ padding: '20px 24px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-.3px', display: 'flex', alignItems: 'center', gap: 8 }}>
             Defense Testing
@@ -58,7 +58,7 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = fals
               ? 'Defense node is processing attack prompts…'
               : defenseResponses.length > 0
               ? `${defenseResponses.length} responses received`
-              : 'Waiting for run to start — Start Run triggers the full pipeline'}
+              : 'Waiting for run to start'}
           </div>
         </div>
         {defenseResponses.length > 0 && !isEvaluating && (
@@ -68,40 +68,37 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = fals
         )}
       </div>
 
-      {/* ── Error ── */}
       {defenseError && (
-        <div style={{ margin: '12px 24px 0', padding: '9px 13px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, fontSize: 12, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ margin: '12px 24px 0', padding: '9px 13px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, fontSize: 12, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           ⚠ {defenseError}
           <button style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626' }} onClick={() => setDefenseError(null)}>✕</button>
         </div>
       )}
 
-      {/* ── Section 1: Stat chips ── */}
-      <div style={{ padding: '16px 24px 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {/* ── Stat chips ── */}
+      <div style={{ padding: '16px 24px 0', display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
         {[
-          { label: 'Total',    val: total,   color: '#1A1A1A' },
-          { label: 'Blocked',  val: blocked, color: '#15803D' },
-          { label: 'Passed',   val: passed,  color: '#DC2626' },
+          { label: 'Total',   val: total,   color: '#1A1A1A' },
+          { label: 'Blocked', val: blocked, color: '#15803D' },
+          { label: 'Passed',  val: passed,  color: '#DC2626' },
         ].map(({ label, val, color }) => (
           <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-            <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: defenseStats ? color : '#DDD' }}>
-              {defenseStats ? val : '—'}
+            <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: total > 0 ? color : '#DDD' }}>
+              {total > 0 ? val : '—'}
             </span>
             <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
           </div>
         ))}
-        {/* Defense score chip */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: `1px solid ${defenseStats ? scoreColor + '40' : '#E8E6E0'}`, borderRadius: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: `1px solid ${score != null ? scoreColor + '40' : '#E8E6E0'}`, borderRadius: 8 }}>
           <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: scoreColor }}>
-            {score != null ? score : '—'}
+            {score != null ? `${score}%` : '—'}
           </span>
-          <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Score</span>
+          <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Block Rate</span>
         </div>
       </div>
 
-      {/* ── Section 2: Response feed ── */}
+      {/* ── Response feed ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>
-        {/* List header */}
         <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #F0EDE6', flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>Defense Responses</span>
           <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#BBB' }}>
@@ -114,7 +111,7 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = fals
           </span>
         </div>
 
-        {defenseResponses.length === 0 ? (
+        {displayed.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#CCC' }}>
             {isEvaluating ? (
               <>
@@ -133,50 +130,39 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = ({ embedded = fals
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {defenseResponses.slice().reverse().map((r: DefenseResponse, i: number) => {
-              const cfg     = EVAL_CFG[r.evaluation] ?? EVAL_CFG.passed;
-              const isExp   = expandedId === `${r.promptId}-${i}`;
-              const key     = `${r.promptId}-${i}`;
+            {displayed.map((r: DefenseResponse, i: number) => {
+              const cfg   = EVAL_CFG[r.evaluation] ?? EVAL_CFG.passed;
+              const isExp = expandedId === r.promptId;
               return (
                 <div
-                  key={key}
+                  key={r.promptId}
                   className="df-row"
                   style={{ padding: '13px 16px', borderBottom: '1px solid #F9F8F6', cursor: 'pointer', transition: 'background .1s' }}
-                  onClick={() => setExpandedId(isExp ? null : key)}
+                  onClick={() => setExpandedId(isExp ? null : r.promptId)}
                 >
-                  {/* Row header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isExp ? 10 : 0 }}>
-                    {/* Index */}
                     <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0, minWidth: 20 }}>
-                      {String(defenseResponses.length - i).padStart(2, '0')}
+                      {String(displayed.length - i).padStart(2, '0')}
                     </span>
-
-                    {/* Block / Pass indicator */}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, flexShrink: 0 }}>
                       {r.was_blocked ? <Shield size={9}/> : <AlertTriangle size={9}/>}
                       {cfg.label}
                     </span>
-
-                    {/* Detected attack type */}
                     {r.attack_type && (
-                      <span style={{ fontSize: 10, color: '#888', background: '#F7F6F3', padding: '2px 7px', borderRadius: 10, border: '1px solid #E8E6E0', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 10, color: '#888', background: '#F7F6F3', padding: '2px 7px', borderRadius: 10, border: '1px solid #E8E6E0' }}>
                         {r.attack_type}
                       </span>
                     )}
-
-                    {/* Which filter caught it */}
                     {r.was_blocked && r.blocked_by && (
-                      <span style={{ fontSize: 10, color: '#6366F1', background: '#EEF2FF', padding: '2px 7px', borderRadius: 10, border: '1px solid #C7D2FE', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 10, color: '#6366F1', background: '#EEF2FF', padding: '2px 7px', borderRadius: 10, border: '1px solid #C7D2FE' }}>
                         via {r.blocked_by}
                       </span>
                     )}
-
                     <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0 }}>
                       {new Date(r.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
 
-                  {/* Response text — always show first 80 chars, expand on click */}
                   <div style={{ marginLeft: 30, fontSize: 12, color: r.was_blocked ? '#888' : '#333', fontFamily: r.was_blocked ? 'inherit' : 'DM Mono,monospace', lineHeight: 1.55, marginTop: 6 }}>
                     {r.was_blocked ? (
                       <span style={{ color: '#888', fontStyle: 'italic' }}>

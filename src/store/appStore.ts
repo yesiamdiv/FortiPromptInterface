@@ -171,7 +171,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Defense
   setDefenseResponses:   (defenseResponses) => set({ defenseResponses }),
-  addDefenseResponse:    (response)         => set(s => ({ defenseResponses: [...s.defenseResponses, response] })),
+  addDefenseResponse: (response) => set(s => {
+    if (s.defenseResponses.some(x => x.promptId === response.promptId)) return s;
+    return { defenseResponses: [...s.defenseResponses, response] };
+  }),
   clearDefenseResponses: ()                 => set({ defenseResponses: [] }),
   setDefenseStats:       (defenseStats)     => set({ defenseStats }),
   setIsEvaluating:       (isEvaluating)     => set({ isEvaluating }),
@@ -179,7 +182,21 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Evaluation
   addEvalResult: (result) => set(s => {
-    if (s.evalResults.some(r => r.evalId === result.evalId)) return s;
+    const existing = s.evalResults.findIndex(r => r.evalId === result.evalId);
+    if (existing >= 0) {
+      // Already exists — patch missing content fields only (don't overwrite everything)
+      const prev = s.evalResults[existing];
+      const merged = {
+        ...prev,
+        attackContent:  result.attackContent  ?? prev.attackContent,
+        defenseContent: result.defenseContent ?? prev.defenseContent,
+        was_blocked:    result.was_blocked    ?? prev.was_blocked,
+        attack_type:    result.attack_type    ?? prev.attack_type,
+      };
+      const next = [...s.evalResults];
+      next[existing] = merged;
+      return { evalResults: next };
+    }
     return { evalResults: [...s.evalResults, result] };
   }),
   setEvalResults:   (evalResults) => set({ evalResults }),

@@ -271,22 +271,22 @@ const Section: React.FC<{
 // ─── Main component ────────────────────────────────────────────────────────────
 
 const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked = false }) => {
-  const activeRunId    = useAppStore(s => s.activeRunId);
-  const runs           = useAppStore(s => s.runs);
-  const runDiscovery   = useAppStore(s => s.runDiscovery);
+  const activeRunId     = useAppStore(s => s.activeRunId);
+  const runs            = useAppStore(s => s.runs);
+  const runDiscovery    = useAppStore(s => s.runDiscovery);
   const setRunDiscovery = useAppStore(s => s.setRunDiscovery);
 
   const run = runs.find(r => r.runid === activeRunId);
 
-  // Editable param state (one object per node type + strategy)
-  const [attackParams,   setAttackParams]   = useState<Record<string, any>>({});
-  const [defenseParams,  setDefenseParams]  = useState<Record<string, any>>({});
-  const [evalParams,     setEvalParams]     = useState<Record<string, any>>({});
-  const [strategyParams, setStrategyParams] = useState<Record<string, any>>({});
+  // ── Load discovery ONCE globally (schemas are static metadata) ──────────────
+  // Keyed on whether we've ever loaded, not on per-run. Once loaded it never
+  // re-fetches unless the store is explicitly reset.
+  const discoveryLoaded  = runDiscovery.loadedForRunId !== null;
+  const discoveryLoading = runDiscovery.loading;
 
-  // ── Load discovery data once per run ──────────────────────────────────────
   useEffect(() => {
-    if (!activeRunId || runDiscovery.loadedForRunId === activeRunId) return;
+    // Already loaded or currently loading — do nothing
+    if (discoveryLoaded || discoveryLoading) return;
 
     const load = async () => {
       setRunDiscovery({ loading: true });
@@ -302,117 +302,19 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
           defenseNodes,
           evalNodes,
           strategies,
-          loadedForRunId: activeRunId,
+          loadedForRunId: 'global', // sentinel — doesn't change per run
           loading: false,
         });
-      } catch (e) {
+      } catch {
         setRunDiscovery({ loading: false });
       }
     };
     load();
-  }, [activeRunId]);
+  }, [discoveryLoaded, discoveryLoading]);
 
-  // ── Seed defaults from schemas when data arrives ──────────────────────────
-  useEffect(() => {
-    if (!run || runDiscovery.loading) return;
-
-    const seedFromSchema = (schema: Record<string, any>) => {
-      const props = schema?.properties ?? {};
-      const defs: Record<string, any> = {};
-      for (const [k, def] of Object.entries(props) as [string, any][]) {
-        if (def.default !== undefined) defs[k] = def.default;
-        else if (def.enum?.length) defs[k] = def.enum[0];
-      }
-      return defs;
-    };
-
-    const cfg = run.config;
-    const attackNodeName = cfg?.attack_node_config?.node_type;
-    const defenseNodeName = cfg?.defense_node_config?.node_type;
-    const evalNodeName = cfg?.evaluation_node_config?.node_type;
-    const stratName = cfg?.strategy_config?.strategy_name;
-
-    const attackSchema = runDiscovery.attackNodes.find(n => n.node_name === attackNodeName)?.schema_definition ?? {};
-    const defenseSchema = runDiscovery.defenseNodes.find(n => n.node_name === defenseNodeName)?.schema_definition ?? {};
-    const evalSchema = runDiscovery.evalNodes.find(n => n.node_name === evalNodeName)?.schema_definition ?? {};
-    const stratSchema = runDiscovery.strategies.find(s => s.strategy_name === stratName)?.schema_definition ?? {};
-
-    // Merge seeded defaults with any existing values from run.config
-    setAttackParams({ ...seedFromSchema(attackSchema), ...(cfg?.attack_node_config ?? {}) });
-    setDefenseParams({ ...seedFromSchema(defenseSchema), ...(cfg?.defense_node_config ?? {}) });
-    setEvalParams({ ...seedFromSchema(evalSchema), ...(cfg?.evaluation_node_config ?? {}) });
-    setStrategyParams({ ...seedFromSchema(stratSchema), ...(cfg?.strategy_config?.strategy_params ?? {}) });
-  }, [run?.runid, runDiscovery.loadedForRunId]);
-
-  // ── Emit changes upstream ──────────────────────────────────────────────────
-  const handleAttackChange = (key: string, val: any) => {
-    if (locked) return;
-    const next = { ...attackParams, [key]: val };
-    setAttackParams(next);
-    onParamsChange?.({ attack_node_params: next });
-  };
-  const handleAttackChangeBatch = (patch: Record<string, any>) => {
-    if (locked) return;
-    const next = { ...attackParams, ...patch };
-    setAttackParams(next);
-    onParamsChange?.({ attack_node_params: next });
-  };
-
-  const handleDefenseChange = (key: string, val: any) => {
-    if (locked) return;
-    const next = { ...defenseParams, [key]: val };
-    setDefenseParams(next);
-    onParamsChange?.({ defense_node_params: next });
-  };
-  const handleDefenseChangeBatch = (patch: Record<string, any>) => {
-    if (locked) return;
-    const next = { ...defenseParams, ...patch };
-    setDefenseParams(next);
-    onParamsChange?.({ defense_node_params: next });
-  };
-
-  const handleEvalChange = (key: string, val: any) => {
-    if (locked) return;
-    const next = { ...evalParams, [key]: val };
-    setEvalParams(next);
-    onParamsChange?.({ evaluation_node_params: next });
-  };
-  const handleEvalChangeBatch = (patch: Record<string, any>) => {
-    if (locked) return;
-    const next = { ...evalParams, ...patch };
-    setEvalParams(next);
-    onParamsChange?.({ evaluation_node_params: next });
-  };
-
-  const handleStrategyChange = (key: string, val: any) => {
-    if (locked) return;
-    const next = { ...strategyParams, [key]: val };
-    setStrategyParams(next);
-    onParamsChange?.({ strategy_params: next });
-  };
-  /**
-   * Called by FileField with a patch of MULTIPLE keys at once (e.g. prompts_file + prompts_file_name).
-   * Merges into strategyParams in one shot — avoids stale-closure overwrites that occur
-   * when two separate onChange calls each read the old state snapshot.
-   */
-  const handleStrategyChangeBatch = (patch: Record<string, any>) => {
-    if (locked) return;
-    const next = { ...strategyParams, ...patch };
-    setStrategyParams(next);
-    onParamsChange?.({ strategy_params: next });
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  if (!run) return (
-    <div style={S.empty}>No active run</div>
-  );
-
-  const cfg = run.config;
-  const isManual = cfg?.graph_type === 'manual';
-  const isBatch  = cfg?.graph_type === 'batch';
-
-  const attackNodeName  = cfg?.attack_node_config?.node_type ?? '—';
+  // ── Resolve schemas from discovery ────────────────────────────────────────
+  const cfg             = run?.config;
+  const attackNodeName  = cfg?.attack_node_config?.node_type  ?? '—';
   const defenseNodeName = cfg?.defense_node_config?.node_type ?? '—';
   const evalNodeName    = cfg?.evaluation_node_config?.node_type ?? '—';
   const stratName       = cfg?.strategy_config?.strategy_name ?? '—';
@@ -427,6 +329,87 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
   const evalNodeDesc    = runDiscovery.evalNodes.find(n => n.node_name === evalNodeName)?.description;
   const stratDesc       = runDiscovery.strategies.find(s => s.strategy_name === stratName)?.description;
 
+  // ── Local param state ─────────────────────────────────────────────────────
+  // Single form object avoids 4 separate setState calls and stale closures.
+  const [params, setParams] = useState<{
+    attack:   Record<string, any>;
+    defense:  Record<string, any>;
+    eval:     Record<string, any>;
+    strategy: Record<string, any>;
+  }>({ attack: {}, defense: {}, eval: {}, strategy: {} });
+
+  // Track which run+strategy we've seeded for so PATCH updates to the store
+  // don't re-wipe in-progress edits. We only re-seed when the run ID or
+  // strategy/node type actually changes, never when params change.
+  const seededForRef = React.useRef<string>('');
+
+  useEffect(() => {
+    if (!run || runDiscovery.loading || !discoveryLoaded) return;
+
+    // Build a stable key from the run id + node/strategy names.
+    // This changes only when the user switches runs or the run config is
+    // updated with a different node/strategy — never on param edits.
+    const seedKey = `${run.runid}|${attackNodeName}|${defenseNodeName}|${evalNodeName}|${stratName}`;
+    if (seededForRef.current === seedKey) return;
+    seededForRef.current = seedKey;
+
+    const seedFromSchema = (schema: Record<string, any>, existing: Record<string, any>) => {
+      const props = schema?.properties ?? {};
+      const seeded: Record<string, any> = {};
+      for (const [k, def] of Object.entries(props) as [string, any][]) {
+        if (def.type === 'file') continue; // never seed file fields — user must upload
+        if (def['ui:widget'] === 'hidden') continue;
+        if (def.default !== undefined) seeded[k] = def.default;
+        else if (def.enum?.length) seeded[k] = def.enum[0];
+      }
+      // Existing saved values win over schema defaults
+      return { ...seeded, ...existing };
+    };
+
+    setParams({
+      attack:   seedFromSchema(attackSchema,  cfg?.attack_node_config?.node_params  ?? {}),
+      defense:  seedFromSchema(defenseSchema, cfg?.defense_node_config?.node_params ?? {}),
+      eval:     seedFromSchema(evalSchema,    cfg?.evaluation_node_config?.node_params ?? {}),
+      strategy: seedFromSchema(stratSchema,   cfg?.strategy_config?.strategy_params   ?? {}),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.runid, attackNodeName, defenseNodeName, evalNodeName, stratName, discoveryLoaded]);
+
+  // ── Generic updater — functional setState avoids ALL stale closure issues ─
+  const updateSection = React.useCallback(
+    (section: 'attack' | 'defense' | 'eval' | 'strategy', patch: Record<string, any>) => {
+      if (locked) return;
+      setParams(prev => {
+        const next = { ...prev[section], ...patch };
+        const updated = { ...prev, [section]: next };
+        // Fire upstream inside the functional update so we always have fresh state
+        setTimeout(() => {
+          const apiKey =
+            section === 'attack'   ? 'attack_node_params'      :
+            section === 'defense'  ? 'defense_node_params'     :
+            section === 'eval'     ? 'evaluation_node_params'  :
+                                     'strategy_params';
+          onParamsChange?.({ [apiKey]: next });
+        }, 0);
+        return updated;
+      });
+    },
+    [locked, onParamsChange]
+  );
+
+  const handleChange = (section: 'attack' | 'defense' | 'eval' | 'strategy') =>
+    (key: string, val: any) => updateSection(section, { [key]: val });
+
+  const handlePatch = (section: 'attack' | 'defense' | 'eval' | 'strategy') =>
+    (patch: Record<string, any>) => updateSection(section, patch);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  if (!run) return <div style={S.empty}>No active run</div>;
+
+  const isManual = cfg?.graph_type === 'manual';
+  const isBatch  = cfg?.graph_type === 'batch';
+
   return (
     <div style={S.root}>
       {locked && (
@@ -435,6 +418,7 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
           Config locked while running
         </div>
       )}
+
       {/* ── Run info ── */}
       <div style={S.runInfo}>
         <div style={S.runName}>{run.name}</div>
@@ -460,65 +444,41 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
       ) : (
         <>
           {/* ── Attack Node ── */}
-          {
-          // !isManual && (
-            <Section
-              icon={<Zap size={13} />}
-              title="Attack Node"
-              subtitle={attackNodeName}
-              badgeColor="#EF4444"
-            >
-              {attackNodeDesc && <div style={S.nodeDesc}>{attackNodeDesc}</div>}
-              <div style={S.readOnlyRow}>
-                <span style={S.roKey}>Node Type</span>
-                <span style={S.roVal}>{attackNodeName}</span>
-              </div>
-              <div style={S.divider} />
-              <SchemaFields
-                schema={attackSchema}
-                values={attackParams}
-                locked={locked}
-                onChange={handleAttackChange}
-                onChangeBatch={handleAttackChangeBatch}
-              />
-            </Section>
-          // )
-          }
+          <Section icon={<Zap size={13} />} title="Attack Node" subtitle={attackNodeName} badgeColor="#EF4444">
+            {attackNodeDesc && <div style={S.nodeDesc}>{attackNodeDesc}</div>}
+            <div style={S.readOnlyRow}>
+              <span style={S.roKey}>Node Type</span>
+              <span style={S.roVal}>{attackNodeName}</span>
+            </div>
+            <div style={S.divider} />
+            <SchemaFields
+              schema={attackSchema}
+              values={params.attack}
+              locked={locked}
+              onChange={handleChange('attack')}
+              onChangeBatch={handlePatch('attack')}
+            />
+          </Section>
 
           {/* ── Defense Node ── */}
-          {
-          // !isManual && (
-            <Section
-              icon={<Shield size={13} />}
-              title="Defense Node"
-              subtitle={defenseNodeName}
-              badgeColor="#22C55E"
-            >
-              {defenseNodeDesc && <div style={S.nodeDesc}>{defenseNodeDesc}</div>}
-              <div style={S.readOnlyRow}>
-                <span style={S.roKey}>Node Type</span>
-                <span style={S.roVal}>{defenseNodeName}</span>
-              </div>
-              <div style={S.divider} />
-              <SchemaFields
-                schema={defenseSchema}
-                values={defenseParams}
-                locked={locked}
-                onChange={handleDefenseChange}
-                onChangeBatch={handleDefenseChangeBatch}
-              />
-            </Section>
-          // )
-          }
+          <Section icon={<Shield size={13} />} title="Defense Node" subtitle={defenseNodeName} badgeColor="#22C55E">
+            {defenseNodeDesc && <div style={S.nodeDesc}>{defenseNodeDesc}</div>}
+            <div style={S.readOnlyRow}>
+              <span style={S.roKey}>Node Type</span>
+              <span style={S.roVal}>{defenseNodeName}</span>
+            </div>
+            <div style={S.divider} />
+            <SchemaFields
+              schema={defenseSchema}
+              values={params.defense}
+              locked={locked}
+              onChange={handleChange('defense')}
+              onChangeBatch={handlePatch('defense')}
+            />
+          </Section>
 
           {/* ── Evaluation Node ── */}
-          <Section
-            icon={<BarChart2 size={13} />}
-            title="Evaluation Node"
-            subtitle={evalNodeName}
-            badgeColor="#6366F1"
-            defaultOpen={isManual}
-          >
+          <Section icon={<BarChart2 size={13} />} title="Evaluation Node" subtitle={evalNodeName} badgeColor="#6366F1" defaultOpen={isManual}>
             {evalNodeDesc && <div style={S.nodeDesc}>{evalNodeDesc}</div>}
             <div style={S.readOnlyRow}>
               <span style={S.roKey}>Node Type</span>
@@ -527,21 +487,15 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
             <div style={S.divider} />
             <SchemaFields
               schema={evalSchema}
-              values={evalParams}
+              values={params.eval}
               locked={locked}
-              onChange={handleEvalChange}
-              onChangeBatch={handleEvalChangeBatch}
+              onChange={handleChange('eval')}
+              onChangeBatch={handlePatch('eval')}
             />
           </Section>
 
-          {/* ── Strategy ── */}
-          <Section
-            icon={<SlidersHorizontal size={13} />}
-            title="Strategy"
-            subtitle={stratName}
-            badgeColor="#0369A1"
-            defaultOpen={false}
-          >
+          {/* ── Strategy — default open so file upload is immediately visible ── */}
+          <Section icon={<SlidersHorizontal size={13} />} title="Strategy" subtitle={stratName} badgeColor="#0369A1" defaultOpen={true}>
             {stratDesc && <div style={S.nodeDesc}>{stratDesc}</div>}
             <div style={S.readOnlyRow}>
               <span style={S.roKey}>Strategy Name</span>
@@ -550,21 +504,20 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
             <div style={S.divider} />
             <SchemaFields
               schema={stratSchema}
-              values={strategyParams}
+              values={params.strategy}
               locked={locked}
-              onChange={handleStrategyChange}
-              onChangeBatch={handleStrategyChangeBatch}
+              onChange={handleChange('strategy')}
+              onChangeBatch={handlePatch('strategy')}
             />
           </Section>
         </>
       )}
 
-      <style>{`
-        @keyframes rcp-spin { to { transform: rotate(360deg); } }
-      `}</style>
+      <style>{`@keyframes rcp-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
