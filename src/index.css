@@ -2,10 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Global height resets ────────────────────────────────────────────────────
-   Required so RunShell (height:100vh) and ManualAttackPage (height:100%)
-   are constrained to the viewport and don't cause body scroll.
-───────────────────────────────────────────────────────────────────────────── */
+/* box-sizing reset only — no overflow or height constraints globally.
+   Pages that need viewport-locked layout (RunShell) handle it themselves
+   via position:fixed or 100dvh on their own root element. */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; }
-#root { height: 100%; }

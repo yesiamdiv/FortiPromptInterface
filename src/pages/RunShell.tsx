@@ -426,7 +426,9 @@ const NAV_H = 52;
 
 const S: Record<string, React.CSSProperties> = {
   // Root fills viewport height exactly — no minHeight, uses flex column
-  root:       { fontFamily: "'DM Sans',sans-serif", background: '#F7F6F3', color: '#1A1A1A', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  // position:fixed makes RunShell self-contained — it covers the viewport without
+  // affecting document scroll, so Dashboard/HomePage can still scroll normally.
+  root:       { fontFamily: "'DM Sans',sans-serif", background: '#F7F6F3', color: '#1A1A1A', position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   nav:        { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: NAV_H, background: '#fff', borderBottom: '1px solid #E8E6E0', position: 'sticky', top: 0, zIndex: 200, flexShrink: 0 },
   navL:       { display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' },
   navR:       { display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 },
