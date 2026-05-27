@@ -305,8 +305,10 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
           loadedForRunId: 'global', // sentinel — doesn't change per run
           loading: false,
         });
-      } catch {
-        setRunDiscovery({ loading: false });
+      } catch (err) {
+        console.error('[RunConfigPanel] Failed to load node discovery:', err);
+        // Always reset loading so the panel doesn't stay stuck in spinner
+        setRunDiscovery({ loading: false, loadedForRunId: null });
       }
     };
     load();
@@ -522,7 +524,7 @@ const RunConfigPanel: React.FC<RunConfigPanelProps> = ({ onParamsChange, locked 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const S: Record<string, React.CSSProperties> = {
-  root:        { display: 'flex', flexDirection: 'column', gap: 0, overflowY: 'auto', height: '100%', background: '#fff' },
+  root:        { display: 'flex', flexDirection: 'column', gap: 0, background: '#fff' },
   empty:       { padding: 24, fontSize: 13, color: '#BBB', textAlign: 'center' },
   loadingBox:  { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '32px 20px', flexDirection: 'column' },
 

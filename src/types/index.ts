@@ -3,7 +3,7 @@ import { LucideProps } from 'lucide-react';
 
 // ─── Run / Session ─────────────────────────────────────────────────────────────
 
-export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'paused';
+export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 export type ComponentType = 'attack' | 'defense' | 'manual';
 
 export interface ComponentLabel {

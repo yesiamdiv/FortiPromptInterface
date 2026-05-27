@@ -139,6 +139,8 @@ const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (wizardStep !== 'config') return;
+    // Skip if already loaded (user went back and came back to config step)
+    if (attackNodeTypes.length > 0 && strategies.length > 0) return;
     const loadDiscoveryData = async () => {
       setLoadingNodes(true);
       try {
@@ -194,19 +196,16 @@ const DashboardPage: React.FC = () => {
 
   const handleModeChange = (mode: RunMode) => {
     setRunMode(mode);
-    // Reset node/strategy selections to defaults for the new mode if applicable
+    // Auto-select the first available strategy for all modes.
+    // For manual mode, prefer a strategy named 'manual' if it exists, else first.
     if (mode === 'manual') {
-      // setSelectedAttackNode('default');
-      // setSelectedDefenseNode('default');
-      // setSelectedEvaluationNode('default');
-      setSelectedStrategy('manual');
-    } else {
-      // Automated defaults
-      // setSelectedAttackNode('default');
-      // setSelectedDefenseNode('default');
-      // setSelectedEvaluationNode('default');
-      setSelectedStrategy('none');
+      const manualStrat = strategies.find(s => s.strategy_name === 'manual');
+      const firstStrat  = strategies[0];
+      if (manualStrat)     setSelectedStrategy('manual');
+      else if (firstStrat) setSelectedStrategy(firstStrat.strategy_name);
+      // else keep current selection — strategies may not be loaded yet (wizard step 1)
     }
+    // For automatic/batch: keep current selection; auto-selection happens in config step
   };
 
   // ── Wizard navigation ─────────────────────────────────────────────────────
@@ -629,7 +628,7 @@ const DashboardPage: React.FC = () => {
                   <div className="db-run-ft">
                     <button
                       className={`db-open-btn ${isManual ? 'manual' : ''}`}
-                      onClick={() => { setActiveRun(run.runid); resetRunState(); navigate(`/runs/${run.runid}/attack`); }}
+                      onClick={() => { setActiveRun(run.runid); resetRunState(); navigate(`/runs/${run.runid}/${isManual ? 'manual' : 'attack'}`); }}
                     >
                       {isManual ? <MessageSquare size={13}/> : <Play size={13}/>}
                       Open Run
@@ -801,12 +800,19 @@ const DashboardPage: React.FC = () => {
                       📂 After creating the run, upload your prompts file in the <strong>Strategy</strong> section of the left panel.
                     </div>
                   )}
-                  {runMode === 'automatic' && (
+                  {(runMode === 'automatic' || runMode === 'batch') && (
                     <>
-                      <div className="db-review-row"><span className="db-review-key">Attack Node</span><span className="db-review-val">{selectedAttackNode}</span></div>
-                      <div className="db-review-row"><span className="db-review-key">Defense Node</span><span className="db-review-val">{selectedDefenseNode}</span></div>
-                      <div className="db-review-row"><span className="db-review-key">Evaluation Node</span><span className="db-review-val">{selectedEvaluationNode}</span></div>
-                      <div className="db-review-row"><span className="db-review-key">Strategy</span><span className="db-review-val">{selectedStrategy}</span></div>
+                      <div className="db-review-row"><span className="db-review-key">Attack Node</span><span className="db-review-val">{selectedAttackNode !== 'none' ? selectedAttackNode : '—'}</span></div>
+                      <div className="db-review-row"><span className="db-review-key">Defense Node</span><span className="db-review-val">{selectedDefenseNode !== 'none' ? selectedDefenseNode : '—'}</span></div>
+                      <div className="db-review-row"><span className="db-review-key">Evaluation Node</span><span className="db-review-val">{selectedEvaluationNode !== 'none' ? selectedEvaluationNode : '—'}</span></div>
+                      <div className="db-review-row"><span className="db-review-key">Strategy</span><span className="db-review-val">{selectedStrategy !== 'none' ? selectedStrategy : '—'}</span></div>
+                    </>
+                  )}
+                  {runMode === 'manual' && (
+                    <>
+                      <div className="db-review-row"><span className="db-review-key">Defense Node</span><span className="db-review-val">{selectedDefenseNode !== 'none' ? selectedDefenseNode : '—'}</span></div>
+                      <div className="db-review-row"><span className="db-review-key">Evaluation Node</span><span className="db-review-val">{selectedEvaluationNode !== 'none' ? selectedEvaluationNode : '—'}</span></div>
+                      <div className="db-review-row"><span className="db-review-key">Strategy</span><span className="db-review-val">{selectedStrategy !== 'none' ? selectedStrategy : '—'}</span></div>
                     </>
                   )}
                 </div>

@@ -1,12 +1,10 @@
 // pages/ManualAttackPage.tsx
 //
-// Layout:
-//   top half:    session creation form + session list
-//   bottom half: chat interface
+// Layout (all within the height allocated by RunShell — no page overflow):
+//   top section:   session creation form + session list (fixed height, scrolls internally)
+//   bottom section: chat interface (fills remaining space, messages scroll internally)
 //
 // Sending a message = one full attack→defense→eval cycle (no separate start button).
-// Config is locked by RunShell while a turn is in-flight (isWaitingForResponse).
-// Left panel (RunConfigPanel) shows full node + strategy config, same as automatic.
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Save, Trash2, Plus, CheckCircle2, XCircle, AlertTriangle, Clock, Zap, Shield, Loader, BarChart2, MessageSquare } from 'lucide-react';
@@ -80,7 +78,6 @@ const TurnBubble: React.FC<{ turn: ChatTurn }> = ({ turn }) => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignSelf: isAttacker ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
-      {/* Role label */}
       <div style={{ fontSize: 9, fontWeight: 600, color: '#AAA', marginBottom: 3, paddingLeft: isAttacker ? 0 : 2, textAlign: isAttacker ? 'right' : 'left', display: 'flex', alignItems: 'center', gap: 4 }}>
         {isAttacker ? (
           <><Zap size={9}/> You (Attacker)</>
@@ -103,7 +100,6 @@ const TurnBubble: React.FC<{ turn: ChatTurn }> = ({ turn }) => {
           {turn.content || <span style={{ opacity: .35 }}>(empty)</span>}
         </div>
 
-        {/* Defense metadata badges */}
         {isDefense && (blockedBy || attackType) && (
           <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
             {blockedBy && (
@@ -139,7 +135,6 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     isSavingSession, setIsSavingSession,
     isWaitingForResponse, setIsWaitingForResponse,
     manualError, setManualError,
-    resetManualState,
   } = useManualStore();
 
   const [loading,         setLoading]         = useState(true);
@@ -161,12 +156,10 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     (async () => {
       setLoading(true);
       try {
-        // Fetch sessions sorted newest-first so order is consistent on reload
         const [rawSess, runStats] = await Promise.all([
           fetchManualSessions(activeRunId).catch(() => []),
           fetchRunStats(activeRunId).catch(() => null),
         ]);
-        // Sort newest-first by created_at so reload order matches live order
         const sess = [...(rawSess ?? [])].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
@@ -191,6 +184,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     })();
   }, [activeRunId]);
 
+  // Auto-scroll chat to bottom when turns change
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeSession?.turns.length]);
@@ -202,7 +196,6 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     try {
       const label = newLabel.trim() || `Session ${sessions.length + 1}`;
       const sess  = await createManualSession(activeRunId, { name: label, description: newDesc.trim() || undefined });
-      // Prepend so newest is always at top — consistent with reload sort order
       addSession(sess, 'prepend');
       setActiveSession(sess);
       setNewLabel('');
@@ -218,7 +211,6 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     setLoadingHistory(true);
     try {
       const history = await getManualSessionHistory(activeRunId!, sess.session_id);
-      // Assemble ChatTurn[] from raw typed records per API contract
       const assembled: ChatTurn[] = [];
       for (const raw of (history.turns ?? [])) {
         if (raw.attack_data) {
@@ -250,10 +242,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
           });
         }
       }
-      const full: ChatSession = {
-        ...history.session,
-        turns: assembled,
-      };
+      const full: ChatSession = { ...history.session, turns: assembled };
       updateSession(sess.session_id, full);
       setActiveSession(full);
       if (full.status === 'active') websocketService.joinSessionRoom(sess.session_id);
@@ -276,19 +265,13 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
   };
 
   // ── Send turn ────────────────────────────────────────────────────────────────
-  // DO NOT add an optimistic attacker bubble here.
-  // The backend echoes it back via manual_attack_generated WS event.
-  // Adding it here AND relying on WS causes double messages.
   const handleSend = async () => {
     if (!canSend || !activeRunId || !activeSession) return;
     const content = input.trim();
     setInput('');
     setIsWaitingForResponse(true);
-
     try {
       await submitManualTurn(activeRunId, activeSession.session_id, { prompt: content });
-      // WS sequence: manual_attack_generated → manual_defence_response
-      //              → manual_evaluation_complete → run_idle (unlocks input)
     } catch (e: any) {
       setManualError(e.message);
       setIsWaitingForResponse(false);
@@ -311,11 +294,11 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
       setSaveLabelInput('');
       const runStats = await fetchRunStats(activeRunId).catch(() => null);
       if (runStats) {
-        const sess = sessions;
+        const currentSessions = useManualStore.getState().sessions;
         setManualStats({
-          total_sessions:  sess.length,
-          saved_sessions:  sess.filter(s => s.status === 'completed').length + 1,
-          active_sessions: sess.filter(s => s.status === 'active').length,
+          total_sessions:  currentSessions.length,
+          saved_sessions:  currentSessions.filter(s => s.status === 'completed').length,
+          active_sessions: currentSessions.filter(s => s.status === 'active').length,
           breach_count:    runStats.total_evaluations
             ? Math.round((runStats.success_rate ?? 0) * runStats.total_evaluations) : 0,
           blocked_count:   runStats.total_evaluations
@@ -331,7 +314,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
   // ─────────────────────────────────────────────────────────────────────────────
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, gap: 10, fontFamily: "'DM Sans',sans-serif" }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10, fontFamily: "'DM Sans',sans-serif" }}>
       <style>{`@keyframes man-spin{to{transform:rotate(360deg)}}`}</style>
       <Loader size={18} style={{ animation: 'man-spin .7s linear infinite', color: '#888' }}/>
       <span style={{ fontSize: 13, color: '#888' }}>Loading sessions…</span>
@@ -339,6 +322,8 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
   );
 
   return (
+    // Outer: fills the height given by RunShell's <main style={S.content}>
+    // overflow:hidden prevents this component from ever growing the page
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif", overflow: 'hidden' }}>
       <style>{`
         @keyframes man-spin { to { transform: rotate(360deg); } }
@@ -357,15 +342,16 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════
-          TOP HALF: Session management
+          TOP SECTION: Session management — fixed portion, scrolls internally
+          flex: 0 0 auto + maxHeight: 40% gives it a ceiling;
+          children with overflow:auto scroll within.
       ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ flex: '0 0 auto', borderBottom: '1px solid #E8E6E0', display: 'flex', minHeight: 0, maxHeight: '42%' }}>
+      <div style={{ flexShrink: 0, borderBottom: '1px solid #E8E6E0', display: 'flex', maxHeight: '40%', minHeight: 120, overflow: 'hidden' }}>
 
-        {/* Create session form */}
-        <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #E8E6E0', padding: 16, display: 'flex', flexDirection: 'column', gap: 10, background: '#FAFAF9' }}>
+        {/* Create session form — fixed width, always visible */}
+        <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #E8E6E0', padding: 16, display: 'flex', flexDirection: 'column', gap: 10, background: '#FAFAF9', overflowY: 'auto' }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.4px' }}>New Session</div>
 
-          {/* Stats row */}
           {manualStats && (
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 9, background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 8, padding: '2px 6px', color: '#666' }}>
@@ -380,7 +366,6 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
             </div>
           )}
 
-          {/* Label input */}
           <div>
             <label style={{ fontSize: 10, fontWeight: 500, color: '#999', textTransform: 'uppercase', letterSpacing: '.3px', display: 'block', marginBottom: 4 }}>
               Session Label
@@ -394,7 +379,6 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
             />
           </div>
 
-          {/* Description input */}
           <div>
             <label style={{ fontSize: 10, fontWeight: 500, color: '#999', textTransform: 'uppercase', letterSpacing: '.3px', display: 'block', marginBottom: 4 }}>
               Notes (optional)
@@ -418,9 +402,8 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
           </button>
         </div>
 
-        {/* Session list */}
+        {/* Session list — scrolls independently */}
         <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }}>
-          {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F0EDE6', position: 'sticky', top: 0, background: '#fff', zIndex: 1 }}>
             <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>Sessions</span>
             <span style={{ fontSize: 10, color: '#BBB', fontFamily: 'DM Mono,monospace' }}>{sessions.length}</span>
@@ -472,7 +455,8 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          BOTTOM HALF: Chat interface
+          BOTTOM SECTION: Chat interface — fills remaining height
+          flex:1 + minHeight:0 ensures it never pushes beyond the page
       ══════════════════════════════════════════════════════════════════════ */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
         {!activeSession ? (
@@ -485,7 +469,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
           </div>
         ) : (
           <>
-            {/* Chat header */}
+            {/* Chat header — fixed, does not scroll */}
             <div style={{ padding: '9px 20px', background: '#fff', borderBottom: '1px solid #E8E6E0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
@@ -518,8 +502,8 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
               </div>
             </div>
 
-            {/* Messages */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Messages — flex:1 + minHeight:0 + overflowY:auto = proper scroll within container */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {loadingHistory ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px 0', gap: 8 }}>
                   <Loader size={16} className="man-spin" style={{ color: '#888' }}/>
@@ -535,7 +519,6 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
                 ))
               )}
 
-              {/* Processing indicator — appears while waiting for defense/eval */}
               {isWaitingForResponse && (
                 <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px', background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: '12px 12px 12px 3px', fontSize: 12, color: '#888' }}>
                   <Loader size={11} className="man-spin"/>
@@ -545,10 +528,9 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
               <div ref={chatEndRef}/>
             </div>
 
-            {/* Input area */}
+            {/* Input area — fixed at bottom, does not scroll */}
             {isSessionActive ? (
               <div style={{ padding: '10px 20px 14px', background: '#fff', borderTop: '1px solid #E8E6E0', flexShrink: 0 }}>
-                {/* Helper text */}
                 <div style={{ fontSize: 10, color: '#CCC', marginBottom: 6 }}>
                   Each message triggers one attack→defense→eval cycle. The session context is used for multi-turn continuity.
                 </div>

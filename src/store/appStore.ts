@@ -72,6 +72,7 @@ interface AppState {
   // ── Run actions ───────────────────────────────────────────────────────────────
   setRuns:      (runs: Run[]) => void;
   addRun:       (run: Run)    => void;
+  upsertRun:    (run: Run)    => void;   // add or update by runid
   updateRun:    (id: string, patch: Partial<Run>) => void;
   deleteRun:    (id: string)  => void;
   setActiveRun: (id: string | null) => void;
@@ -145,7 +146,19 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Runs
   setRuns:   (runs)  => set({ runs }),
-  addRun:    (run)   => set(s => ({ runs: [...s.runs, run] })),
+  addRun:    (run)   => set(s => {
+    // Deduplicate: if run already exists, update it instead of appending
+    if (s.runs.some(r => r.runid === run.runid)) {
+      return { runs: s.runs.map(r => r.runid === run.runid ? { ...r, ...run } : r) };
+    }
+    return { runs: [...s.runs, run] };
+  }),
+  upsertRun: (run) => set(s => {
+    if (s.runs.some(r => r.runid === run.runid)) {
+      return { runs: s.runs.map(r => r.runid === run.runid ? { ...r, ...run } : r) };
+    }
+    return { runs: [...s.runs, run] };
+  }),
   updateRun: (id, patch) =>
     set(s => ({ runs: s.runs.map(r => r.runid === id ? { ...r, ...patch } : r) })),
   deleteRun: (id) => set(s => ({ runs: s.runs.filter(r => r.runid !== id) })),
@@ -184,7 +197,6 @@ export const useAppStore = create<AppState>((set) => ({
   addEvalResult: (result) => set(s => {
     const existing = s.evalResults.findIndex(r => r.evalId === result.evalId);
     if (existing >= 0) {
-      // Already exists — patch missing content fields only (don't overwrite everything)
       const prev = s.evalResults[existing];
       const merged = {
         ...prev,

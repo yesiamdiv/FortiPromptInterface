@@ -160,6 +160,8 @@ class WebSocketService {
     s.on('evaluation_result', (data: WSEvalResult) => {
       const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
+      // Dedup: if evaluation_complete fires for the same turn, skip
+      if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
       // Cross-join with already-stored attack prompt and defense response
       const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
       const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
