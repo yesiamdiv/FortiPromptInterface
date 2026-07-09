@@ -15,7 +15,7 @@ const EVAL_CFG: Record<DefenseEvaluation, { label: string; bg: string; color: st
 const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
   const defenseResponses      = useAppStore(s => s.defenseResponses);
   const defenseStats          = useAppStore(s => s.defenseStats);
-  const isEvaluating          = useAppStore(s => s.isEvaluating);
+  const isAttacking           = useAppStore(s => s.isAttacking);
   const defenseError          = useAppStore(s => s.defenseError);
   const clearDefenseResponses = useAppStore(s => s.clearDefenseResponses);
   const setDefenseError       = useAppStore(s => s.setDefenseError);
@@ -46,7 +46,7 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-.3px', display: 'flex', alignItems: 'center', gap: 8 }}>
             Defense Testing
-            {isEvaluating && (
+            {isAttacking && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 500, color: '#15803D', background: '#F0FDF4', padding: '2px 8px', borderRadius: 12 }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22C55E', display: 'inline-block', animation: 'df-pulse 1.5s infinite' }}/>
                 Evaluating
@@ -54,14 +54,14 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
             )}
           </div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>
-            {isEvaluating
+            {isAttacking
               ? 'Defense node is processing attack prompts…'
               : defenseResponses.length > 0
               ? `${defenseResponses.length} responses received`
               : 'Waiting for run to start'}
           </div>
         </div>
-        {defenseResponses.length > 0 && !isEvaluating && (
+        {defenseResponses.length > 0 && !isAttacking && (
           <button onClick={clearDefenseResponses} style={{ fontSize: 11, color: '#AAA', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', marginTop: 2 }}>
             Clear
           </button>
@@ -102,7 +102,7 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
         <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #F0EDE6', flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>Defense Responses</span>
           <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#BBB' }}>
-            {isEvaluating
+            {isAttacking
               ? <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <svg className="df-spin" width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="#E8E6E0" strokeWidth="1.5"/><path d="M5.5 1.5a4 4 0 0 1 4 4" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   streaming
@@ -113,7 +113,7 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
 
         {displayed.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#CCC' }}>
-            {isEvaluating ? (
+            {isAttacking ? (
               <>
                 <svg className="df-spin" width="24" height="24" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="9" stroke="#E8E6E0" strokeWidth="2"/>

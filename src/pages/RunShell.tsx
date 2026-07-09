@@ -1,21 +1,21 @@
 // pages/RunShell.tsx
 // Routes: /runs/:runId/:tab  (tab = attack | defense | evaluation | manual)
-// Seeds activeRunId from URL on mount.
-// PATCH config → startAutomaticRun is triggered from here for automatic runs.
-// Manual runs: sending a message in the chat IS the start trigger.
+// Layout and navigation only — data fetching lives in useRunHydration,
+// param debouncing lives in useRunParamSync.
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Zap, Shield, MessageSquare, ArrowLeft, Play, Pause, BarChart2, Lock } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
-import { updateRun as updateRunApi, fetchRun, startAutomaticRun, stopRun, fetchRunAttacks, fetchRunDefences, fetchRunEvaluations, fetchRunStats } from '../services/api';
+import { updateRun as updateRunApi, startAutomaticRun, stopRun } from '../services/api';
 import { UpdateRunRequest } from '../types';
 import RunConfigPanel from '../components/RunConfigPanel';
 import AttackTestingPage from './AttackTestingPage';
 import DefenseTestingPage from './DefenseTestingPage';
 import EvaluationPage from './EvaluationPage';
 import ManualAttackPage from './ManualAttackPage';
-import { websocketService } from '../services/websocket';
+import { useRunHydration, useRunParamSync } from '../hooks';
+import { styles as S, NAV_H } from './RunShell.styles';
 
 export type RunTab = 'attack' | 'defense' | 'evaluation' | 'manual';
 const VALID_TABS: RunTab[] = ['attack', 'defense', 'evaluation', 'manual'];
@@ -46,167 +46,38 @@ const RunShell: React.FC = () => {
   const navigate = useNavigate();
 
   const runs           = useAppStore(s => s.runs);
-  const activeRunId    = useAppStore(s => s.activeRunId);
   const isRunLocked    = useAppStore(s => s.isRunLocked);
   const isAttacking    = useAppStore(s => s.isAttacking);
   const setActiveRun   = useAppStore(s => s.setActiveRun);
-  const resetRunState  = useAppStore(s => s.resetRunState);
   const updateRunStore = useAppStore(s => s.updateRun);
-  const upsertRun      = useAppStore(s => s.upsertRun);
   const setIsAttacking = useAppStore(s => s.setIsAttacking);
   const setIsRunLocked = useAppStore(s => s.setIsRunLocked);
   const setAttackError = useAppStore(s => s.setAttackError);
   const clearAttackPrompts    = useAppStore(s => s.clearAttackPrompts);
   const clearDefenseResponses = useAppStore(s => s.clearDefenseResponses);
   const clearEvalResults      = useAppStore(s => s.clearEvalResults);
-  const addAttackPrompt    = useAppStore(s => s.addAttackPrompt);
-  const addDefenseResponse = useAppStore(s => s.addDefenseResponse);
-  const addEvalResult      = useAppStore(s => s.addEvalResult);
-  const setEvalStats       = useAppStore(s => s.setEvalStats);
-  const setDefenseStats    = useAppStore(s => s.setDefenseStats);
 
-  const [saving,   setSaving]   = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
-  // Track which runId we last hydrated so switching tabs within the same run
-  // does NOT re-clear and re-fetch data.
-  const hydratedForRef = useRef<string | null>(null);
+  // Hydrate run data when runId changes
+  const hydratedForRef = useRunHydration(runId);
 
-  // Pending param updates from RunConfigPanel (debounced)
-  const [pendingUpdate, setPendingUpdate] = useState<UpdateRunRequest | null>(null);
-
-  // ── Seed activeRunId from URL, fetch run + hydrate all data ─────────────────
-  useEffect(() => {
-    if (!runId) return;
-
-    // Only reset + re-hydrate when we switch to a *different* run
-    if (hydratedForRef.current === runId) return;
-    hydratedForRef.current = runId;
-
-    resetRunState();
-    setActiveRun(runId);
-
-    // Clear stale data from any previously viewed run
-    clearAttackPrompts();
-    clearDefenseResponses();
-    clearEvalResults();
-
-    const hydrateData = async () => {
-      let run: any = null;
-      try {
-        run = await fetchRun(runId);
-        upsertRun(run);  // upsert so we never get duplicates
-      } catch { /* run not found — leave nav showing stale from store */ }
-
-      // Reflect live run status in nav + lock state
-      if (run?.status === 'running') {
-        setIsRunLocked(true);
-        setIsAttacking(true);
-      }
-
-      // Manual runs: ManualAttackPage fetches its own sessions/history
-      const isManualRun = run?.config?.graph_type === 'manual';
-      if (!run || isManualRun) return;
-
-      // Fetch attack, defence, evaluation data + stats in parallel
-      const [attacks, defences, evaluations, stats] = await Promise.allSettled([
-        fetchRunAttacks(runId),
-        fetchRunDefences(runId),
-        fetchRunEvaluations(runId),
-        fetchRunStats(runId),
-      ]);
-
-      if (attacks.status === 'fulfilled') {
-        for (const a of attacks.value) {
-          addAttackPrompt({
-            promptId:  a.turn_id,
-            content:   a.prompt,
-            status:    'generated',
-            timestamp: a.timestamp ?? new Date().toISOString(),
-            metadata:  a.metadata ?? {},
-          });
-        }
-      }
-
-      if (defences.status === 'fulfilled') {
-        for (const d of defences.value) {
-          addDefenseResponse({
-            promptId:        d.turn_id,
-            defenseResponse: d.response,
-            evaluation:      d.was_blocked ? 'blocked' : 'passed',
-            was_blocked:     d.was_blocked ?? false,
-            blocked_by:      d.metadata?.blocked_by,
-            attack_type:     d.metadata?.attack_type,
-            timestamp:       d.timestamp ?? new Date().toISOString(),
-          });
-        }
-      }
-
-      if (evaluations.status === 'fulfilled') {
-        const attackMap  = attacks.status  === 'fulfilled' ? Object.fromEntries(attacks.value.map((a: any)  => [a.turn_id, a]))  : {};
-        const defenceMap = defences.status === 'fulfilled' ? Object.fromEntries(defences.value.map((d: any) => [d.turn_id, d])) : {};
-        for (const e of evaluations.value) {
-          addEvalResult({
-            evalId:         e.turn_id,
-            promptId:       e.turn_id,
-            verdict:        e.success ? 'breach' : 'defended',
-            score:          e.score ?? 0,
-            reasoning:      e.feedback ?? '',
-            timestamp:      e.timestamp ?? new Date().toISOString(),
-            attackContent:  (attackMap as any)[e.turn_id]?.prompt,
-            defenseContent: (defenceMap as any)[e.turn_id]?.response,
-            was_blocked:    (defenceMap as any)[e.turn_id]?.was_blocked,
-            attack_type:    (defenceMap as any)[e.turn_id]?.metadata?.attack_type,
-          });
-        }
-      }
-
-      if (stats.status === 'fulfilled') {
-        const s = stats.value;
-        const total = s.total_evaluations ?? 0;
-        setEvalStats({
-          total,
-          breaches:     total ? Math.round((s.success_rate  ?? 0) * total) : 0,
-          defended:     total ? total - Math.round((s.success_rate ?? 0) * total) : 0,
-          partial:      0,
-          averageScore: s.average_score ?? 0,
-          breachRate:   s.success_rate  ?? 0,
-        });
-        setDefenseStats({
-          totalResponses:      s.total_defences ?? 0,
-          blockedCount:        total ? Math.round((s.blocked_rate ?? 0) * total) : 0,
-          passedCount:         total ? total - Math.round((s.blocked_rate ?? 0) * total) : 0,
-          overallDefenseScore: s.blocked_rate != null ? Math.round(s.blocked_rate * 100) : 0,
-        });
-      }
-    };
-
-    hydrateData();
-
-    // Join the WS run room
-    websocketService.joinRun(runId);
-    return () => {
-      websocketService.leaveRun(runId);
-      // Reset hydratedForRef so navigation to same runId from outside re-hydrates
-      // We intentionally do NOT reset here so tab switches don't re-hydrate.
-    };
-  // Only re-run when runId changes (not on every render)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+  // Debounced param sync with flush-on-start capability
+  const { handleParamsChange, flushPending, saving } = useRunParamSync(runId, isRunLocked);
 
   const run           = runs.find(r => r.runid === runId);
   const availableTabs = getAvailableTabs(run);
   const isManual      = run?.config?.graph_type === 'manual';
 
-  // Resolve active tab
+  // Resolve active tab — fall back to first available if URL tab is invalid
   const activeTab: RunTab = (() => {
     if (tab && VALID_TABS.includes(tab as RunTab) && availableTabs.includes(tab as RunTab))
       return tab as RunTab;
     return availableTabs[0];
   })();
 
-  // Redirect if URL tab is invalid for this run type
+  // Redirect if URL tab is not valid for this run type
   useEffect(() => {
     if (runId && activeTab && tab !== activeTab) {
       navigate(`/runs/${runId}/${activeTab}`, { replace: true });
@@ -215,56 +86,23 @@ const RunShell: React.FC = () => {
 
   const handleTabChange = (t: RunTab) => navigate(`/runs/${runId}/${t}`);
   const handleBack      = () => {
-    hydratedForRef.current = null; // force re-hydrate if user returns to same run
+    // Reset so navigating back and returning to same run re-hydrates
+    hydratedForRef.current = null;
     setActiveRun(null);
     navigate('/dashboard');
   };
 
-  // ── Debounced PATCH for RunConfigPanel changes ────────────────────────────────
-  useEffect(() => {
-    if (!pendingUpdate || !runId || isRunLocked) return;
-    const timer = setTimeout(async () => {
-      setSaving(true);
-      try {
-        const updated = await updateRunApi(runId, pendingUpdate);
-        updateRunStore(runId, updated);
-        setPendingUpdate(null);
-      } catch { /* non-fatal */ }
-      finally { setSaving(false); }
-    }, 800);
-    return () => clearTimeout(timer);
-  }, [pendingUpdate, runId, isRunLocked]);
-
-  const handleParamsChange = useCallback((update: UpdateRunRequest) => {
-    if (isRunLocked) return;
-    setPendingUpdate(prev => {
-      if (!prev) return update;
-      const merged: UpdateRunRequest = { ...prev };
-      if (update.strategy_params)         merged.strategy_params         = { ...(prev.strategy_params ?? {}),         ...update.strategy_params };
-      if (update.attack_node_params)      merged.attack_node_params      = { ...(prev.attack_node_params ?? {}),      ...update.attack_node_params };
-      if (update.defense_node_params)     merged.defense_node_params     = { ...(prev.defense_node_params ?? {}),     ...update.defense_node_params };
-      if (update.evaluation_node_params)  merged.evaluation_node_params  = { ...(prev.evaluation_node_params ?? {}),  ...update.evaluation_node_params };
-      return merged;
-    });
-  }, [isRunLocked]);
-
-  // ── Start Run (automatic only) ────────────────────────────────────────────────
+  // ── Start Run (automatic only) ──────────────────────────────────────────────
   const handleStartRun = async () => {
     if (!runId || isManual) return;
     setStartError(null);
     setStarting(true);
 
     try {
-      // Flush pending params if any
-      if (pendingUpdate) {
-        setSaving(true);
-        const updated = await updateRunApi(runId, pendingUpdate);
-        updateRunStore(runId, updated);
-        setPendingUpdate(null);
-        setSaving(false);
-      }
+      // Flush any buffered param updates before starting
+      await flushPending();
 
-      // Clear stale results before starting
+      // Clear stale results from any previous run
       clearAttackPrompts();
       clearDefenseResponses();
       clearEvalResults();
@@ -405,7 +243,7 @@ const RunShell: React.FC = () => {
 
       {/* ── Body ── */}
       <div style={S.body}>
-        {/* Left panel — fixed height, independent scroll */}
+        {/* Left panel — fixed width, scrolls independently */}
         <aside style={S.panel}>
           <RunConfigPanel onParamsChange={handleParamsChange} locked={isRunLocked} />
         </aside>
@@ -420,33 +258,6 @@ const RunShell: React.FC = () => {
       </div>
     </div>
   );
-};
-
-const NAV_H = 52;
-
-const S: Record<string, React.CSSProperties> = {
-  // Root fills viewport height exactly — no minHeight, uses flex column
-  // position:fixed makes RunShell self-contained — it covers the viewport without
-  // affecting document scroll, so Dashboard/HomePage can still scroll normally.
-  root:       { fontFamily: "'DM Sans',sans-serif", background: '#F7F6F3', color: '#1A1A1A', position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  nav:        { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: NAV_H, background: '#fff', borderBottom: '1px solid #E8E6E0', position: 'sticky', top: 0, zIndex: 200, flexShrink: 0 },
-  navL:       { display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' },
-  navR:       { display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 },
-  backBtn:    { display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#888', cursor: 'pointer', border: 'none', background: 'none', fontFamily: 'inherit', flexShrink: 0 },
-  navSep:     { width: 1, height: 14, background: '#E8E6E0', flexShrink: 0 },
-  navLogo:    { fontSize: 13, fontWeight: 600, letterSpacing: '-.3px', flexShrink: 0 },
-  navRunName: { fontSize: 13, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: 180 },
-  statusPill: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 12, flexShrink: 0 },
-  savingChip: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#888' },
-  runBtn:     { display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12, fontWeight: 500, fontFamily: 'inherit', transition: 'opacity .15s', flexShrink: 0 },
-  tabBar:     { display: 'flex', gap: 0, borderLeft: '1px solid #F0EDE6', paddingLeft: 10 },
-  tabBtn:     { display: 'flex', alignItems: 'center', gap: 5, padding: '0 14px', height: NAV_H, fontSize: 12, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', border: 'none', borderBottom: '2px solid transparent', background: 'transparent', transition: 'all .15s', whiteSpace: 'nowrap' as const },
-  // Body fills remaining height after nav; children must NOT overflow this
-  body:       { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
-  // Left panel: fixed width, scrolls independently
-  panel:      { width: 280, flexShrink: 0, borderRight: '1px solid #E8E6E0', background: '#fff', overflowY: 'auto' as const, height: '100%' },
-  // Content area: flex column, children scroll internally (ManualAttackPage, etc.)
-  content:    { flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' },
 };
 
 export default RunShell;

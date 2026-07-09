@@ -1,18 +1,20 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import DashboardPage from './pages/DashboardPage';
 import RunShell from './pages/RunShell';
 import { useAppStore } from './store/appStore';
 import { websocketService } from './services/websocket';
 import { fetchRuns } from './services/api';
+import { env } from './config';
 
 const AppInner: React.FC = () => {
   const setRuns = useAppStore(s => s.setRuns);
 
   useEffect(() => {
-    const socketUrl = process.env.REACT_APP_SOCKET_URL ?? 'http://localhost:8000';
-    websocketService.connect(socketUrl);
+    // Connect WS and fetch runs on mount.
+    // setRuns is a stable Zustand action — intentionally omitted from dep array.
+    websocketService.connect(env.socketUrl);
 
     const initRuns = async () => {
       try {
@@ -26,7 +28,7 @@ const AppInner: React.FC = () => {
 
     initRuns();
     return () => { websocketService.disconnect(); };
-  }, [setRuns]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Routes>
@@ -42,8 +44,7 @@ const AppInner: React.FC = () => {
 
 // Redirect /runs/:runId → /runs/:runId/attack
 const RunShellRedirect: React.FC = () => {
-  const params = window.location.pathname.split('/');
-  const runId  = params[2] ?? '';
+  const { runId } = useParams<{ runId: string }>();
   return <Navigate to={`/runs/${runId}/attack`} replace />;
 };
 

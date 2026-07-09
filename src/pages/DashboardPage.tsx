@@ -114,7 +114,7 @@ const DashboardPage: React.FC = () => {
   // Store
   const runs               = useAppStore(s => s.runs);
   const setRuns            = useAppStore(s => s.setRuns);
-  const addRun             = useAppStore(s => s.addRun);
+  const upsertRun          = useAppStore(s => s.upsertRun);
   const deleteRunFromStore = useAppStore(s => s.deleteRun);
   const setActiveRun       = useAppStore(s => s.setActiveRun);
   const resetRunState      = useAppStore(s => s.resetRunState);
@@ -264,7 +264,7 @@ const DashboardPage: React.FC = () => {
       };
 
       const created = await createRun(request);
-      addRun(created);
+      upsertRun(created);
       setActiveRun(created.runid);
       resetRunState();
 

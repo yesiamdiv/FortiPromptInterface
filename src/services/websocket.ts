@@ -20,7 +20,7 @@ import {
   WSManualAttackGenerated,
   WSManualDefenseResponse, WSManualEvaluationComplete,
   WSManualTurnCompleted, WSRunIdle,
-} from '../types/manual';
+} from '../types';
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -73,8 +73,8 @@ class WebSocketService {
 
   private setupGlobalEvents(): void {
     this.socket!.on('new_run_available', (data: WSNewRunAvailable) => {
-      const { addRun } = useAppStore.getState();
-      addRun({
+      const { upsertRun } = useAppStore.getState();
+      upsertRun({
         runid:       data.run_id,
         name:        data.run_summary.name,
         description: '',
@@ -105,21 +105,19 @@ class WebSocketService {
     });
 
     s.on('run_completed', (data: WSRunCompleted) => {
-      const { updateRun, setIsAttacking, setIsEvaluating, setIsRunLocked, setRunProgress, activeRunId } = useAppStore.getState();
+      const { updateRun, setIsAttacking, setIsRunLocked, setRunProgress, activeRunId } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
       updateRun(data.run_id, { status: 'completed', updatedAt: new Date().toISOString() });
       setIsAttacking(false);
-      setIsEvaluating(false);
       setIsRunLocked(false);  // Unlock config panel
       setRunProgress(null);
     });
 
     s.on('run_error', (data: WSRunError) => {
-      const { updateRun, setIsAttacking, setIsEvaluating, setIsRunLocked, setAttackError, activeRunId } = useAppStore.getState();
+      const { updateRun, setIsAttacking, setIsRunLocked, setAttackError, activeRunId } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
       updateRun(data.run_id, { status: 'failed', updatedAt: new Date().toISOString() });
       setIsAttacking(false);
-      setIsEvaluating(false);
       setIsRunLocked(false);
       setAttackError(data.error);
     });
@@ -155,20 +153,28 @@ class WebSocketService {
     });
 
     // ── Evaluation node ────────────────────────────────────────────────────────
-    // Suggested new backend events — see API_DOCS.md for implementation spec.
 
-    s.on('evaluation_result', (data: WSEvalResult) => {
-      const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
+    // Both event names map to the same handler (backend may fire either)
+    const handleEvalEvent = (data: WSEvalResult) => {
+      const { addEvalResult, activeRunId } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
-      // Dedup: if evaluation_complete fires for the same turn, skip
+      // Dedup: whichever event fires second for the same turn is a no-op
       if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
-      // Cross-join with already-stored attack prompt and defense response
-      const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
-      const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
+      const matchedAttack  = useAppStore.getState().attackPrompts.find(a => a.promptId === data.turn_id);
+      const matchedDefence = useAppStore.getState().defenseResponses.find(d => d.promptId === data.turn_id);
+
+      // Map category → verdict. Anything containing "partial" is a partial breach;
+      // success=true without partial = full breach; otherwise defended.
+      const cat = (data.evaluation.category ?? '').toLowerCase();
+      const verdict: EvalResult['verdict'] =
+        cat.includes('partial')           ? 'partial'  :
+        data.evaluation.success === true  ? 'breach'   :
+        'defended';
+
       addEvalResult({
         evalId:         data.turn_id,
         promptId:       data.turn_id,
-        verdict:        data.evaluation.success ? 'breach' : 'defended',
+        verdict,
         score:          data.evaluation.score ?? 0,
         reasoning:      data.evaluation.reasoning ?? '',
         timestamp:      data.evaluation.timestamp ?? new Date().toISOString(),
@@ -177,28 +183,9 @@ class WebSocketService {
         was_blocked:    matchedDefence?.was_blocked,
         attack_type:    matchedDefence?.attack_type,
       });
-    });
-
-    // Also listen under the alternate event name the backend may use
-    s.on('evaluation_complete', (data: WSEvalResult) => {
-      const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
-      if (activeRunId !== data.run_id) return;
-      if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
-      const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
-      const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
-      addEvalResult({
-        evalId:         data.turn_id,
-        promptId:       data.turn_id,
-        verdict:        data.evaluation.success ? 'breach' : 'defended',
-        score:          data.evaluation.score ?? 0,
-        reasoning:      data.evaluation.reasoning ?? '',
-        timestamp:      data.evaluation.timestamp ?? new Date().toISOString(),
-        attackContent:  matchedAttack?.content,
-        defenseContent: matchedDefence?.defenseResponse,
-        was_blocked:    matchedDefence?.was_blocked,
-        attack_type:    matchedDefence?.attack_type,
-      });
-    });
+    };
+    s.on('evaluation_result',   handleEvalEvent);
+    s.on('evaluation_complete', handleEvalEvent);
 
     s.on('evaluation_stats_updated', (data: WSEvalStats) => {
       const { setEvalStats, activeRunId } = useAppStore.getState();

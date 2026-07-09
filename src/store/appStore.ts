@@ -59,7 +59,6 @@ interface AppState {
   // Defense
   defenseResponses: DefenseResponse[];
   defenseStats:     DefenseStats | null;
-  isEvaluating:     boolean;
   defenseError:     string | null;
 
   // Evaluation
@@ -71,7 +70,6 @@ interface AppState {
 
   // ── Run actions ───────────────────────────────────────────────────────────────
   setRuns:      (runs: Run[]) => void;
-  addRun:       (run: Run)    => void;
   upsertRun:    (run: Run)    => void;   // add or update by runid
   updateRun:    (id: string, patch: Partial<Run>) => void;
   deleteRun:    (id: string)  => void;
@@ -97,7 +95,6 @@ interface AppState {
   addDefenseResponse:    (response: DefenseResponse)    => void;
   clearDefenseResponses: ()                              => void;
   setDefenseStats:       (stats: DefenseStats)           => void;
-  setIsEvaluating:       (v: boolean)                    => void;
   setDefenseError:       (msg: string | null)            => void;
 
   // ── Evaluation actions ────────────────────────────────────────────────────────
@@ -136,7 +133,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   defenseResponses: [],
   defenseStats:     null,
-  isEvaluating:     false,
   defenseError:     null,
 
   evalResults: [],
@@ -146,13 +142,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Runs
   setRuns:   (runs)  => set({ runs }),
-  addRun:    (run)   => set(s => {
-    // Deduplicate: if run already exists, update it instead of appending
-    if (s.runs.some(r => r.runid === run.runid)) {
-      return { runs: s.runs.map(r => r.runid === run.runid ? { ...r, ...run } : r) };
-    }
-    return { runs: [...s.runs, run] };
-  }),
   upsertRun: (run) => set(s => {
     if (s.runs.some(r => r.runid === run.runid)) {
       return { runs: s.runs.map(r => r.runid === run.runid ? { ...r, ...run } : r) };
@@ -190,7 +179,6 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   clearDefenseResponses: ()                 => set({ defenseResponses: [] }),
   setDefenseStats:       (defenseStats)     => set({ defenseStats }),
-  setIsEvaluating:       (isEvaluating)     => set({ isEvaluating }),
   setDefenseError:       (defenseError)     => set({ defenseError }),
 
   // Evaluation
@@ -229,7 +217,6 @@ export const useAppStore = create<AppState>((set) => ({
     attackError:      null,
     defenseResponses: [],
     defenseStats:     null,
-    isEvaluating:     false,
     defenseError:     null,
     evalResults:      [],
     evalStats:        null,

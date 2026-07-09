@@ -17,25 +17,30 @@ const STATUS_CFG: Record<AttackStatus, { label: string; bg: string; color: strin
 };
 
 const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false }) => {
-  const attackPrompts    = useAppStore(s => s.attackPrompts);
-  const attackStats      = useAppStore(s => s.attackStats);
-  const isAttacking      = useAppStore(s => s.isAttacking);
-  const attackError      = useAppStore(s => s.attackError);
-  const runProgress      = useAppStore(s => s.runProgress);
+  const attackPrompts      = useAppStore(s => s.attackPrompts);
+  const isAttacking        = useAppStore(s => s.isAttacking);
+  const attackError        = useAppStore(s => s.attackError);
+  const runProgress        = useAppStore(s => s.runProgress);
   const clearAttackPrompts = useAppStore(s => s.clearAttackPrompts);
-  const setAttackError   = useAppStore(s => s.setAttackError);
+  const setAttackError     = useAppStore(s => s.setAttackError);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─── Stats derived directly from the store ───────────────────────────────────
+  // attackStats (WS-pushed) was never populated by the backend, so we always
+  // compute from the local prompt list. This is always accurate — both live
+  // (prompts arrive via WS) and after reload (prompts are hydrated from the API).
+  const total   = attackPrompts.length;
+  const breached = attackPrompts.filter(p => p.status === 'breached').length;
+  const blocked  = attackPrompts.filter(p => p.status === 'blocked').length;
+  const pending  = attackPrompts.filter(p => p.status === 'generated' || p.status === 'sent').length;
 
-  const statItems = attackStats
+  const statItems = total > 0
     ? [
-        { label: 'Total',     val: attackStats.totalPrompts,     color: '#1A1A1A' },
-        { label: 'Generated', val: attackStats.attacksGenerated, color: '#1D4ED8' },
-        { label: 'Pending',   val: attackStats.pendingAttacks,   color: '#B45309' },
-        { label: 'Breached',  val: attackPrompts.filter(p => p.status === 'breached').length, color: '#DC2626' },
-        { label: 'Blocked',   val: attackPrompts.filter(p => p.status === 'blocked').length,  color: '#15803D' },
+        { label: 'Total',    val: total,    color: '#1A1A1A' },
+        { label: 'Pending',  val: pending,  color: '#B45309' },
+        { label: 'Breached', val: breached, color: '#DC2626' },
+        { label: 'Blocked',  val: blocked,  color: '#15803D' },
       ]
     : null;
 
@@ -93,17 +98,17 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
                 <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
               </div>
             ))}
-            {/* Progress bar when running */}
-            {isAttacking && attackStats && attackStats.totalPrompts > 0 && (
+            {/* Progress bar — shown while running, uses WS run_progress data */}
+            {isAttacking && runProgress && runProgress.total > 0 && (
               <div style={{ flex: '1 1 100%', marginTop: 4 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#BBB', marginBottom: 4 }}>
                   <span>Progress</span>
                   <span style={{ fontFamily: 'DM Mono,monospace' }}>
-                    {Math.round((attackStats.attacksGenerated / attackStats.totalPrompts) * 100)}%
+                    {Math.round(runProgress.progress_percent)}%
                   </span>
                 </div>
                 <div style={{ height: 3, background: '#E8E6E0', borderRadius: 2 }}>
-                  <div style={{ height: '100%', width: `${(attackStats.attacksGenerated / attackStats.totalPrompts) * 100}%`, background: '#3B82F6', borderRadius: 2, transition: 'width .4s' }}/>
+                  <div style={{ height: '100%', width: `${runProgress.progress_percent}%`, background: '#3B82F6', borderRadius: 2, transition: 'width .4s' }}/>
                 </div>
               </div>
             )}
@@ -120,7 +125,7 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
-            {['Total', 'Generated', 'Pending', 'Breached', 'Blocked'].map(l => (
+            {['Total', 'Pending', 'Breached', 'Blocked'].map(l => (
               <div key={l} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 8 }}>
                 <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: '#DDD' }}>—</span>
                 <span style={{ fontSize: 10, color: '#CCC', textTransform: 'uppercase', letterSpacing: '.3px' }}>{l}</span>

@@ -5,7 +5,7 @@ import {
   ChatTurn,
   ManualRunConfig,
   ManualRunStats,
-} from '../types/manual';
+} from '../types';
 
 interface ManualState {
   manualConfig:    ManualRunConfig | null;

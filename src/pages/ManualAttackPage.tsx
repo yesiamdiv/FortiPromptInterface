@@ -12,7 +12,8 @@ import { useAppStore } from '../store/appStore';
 import { useManualStore } from '../store/manualStore';
 import { fetchManualSessions, deleteManualSession, createManualSession, submitManualTurn, getManualSessionHistory, fetchRunStats } from '../services/api';
 import { websocketService } from '../services/websocket';
-import { ChatSession, ChatTurn, EvaluationLabel } from '../types/manual';
+import { ChatSession, ChatTurn, EvaluationLabel } from '../types';
+import { assembleChatTurns } from '../utils';
 
 interface ManualAttackPageProps { embedded?: boolean; }
 
@@ -211,37 +212,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     setLoadingHistory(true);
     try {
       const history = await getManualSessionHistory(activeRunId!, sess.session_id);
-      const assembled: ChatTurn[] = [];
-      for (const raw of (history.turns ?? [])) {
-        if (raw.attack_data) {
-          assembled.push({
-            turn_id:   `atk-${raw.turn_id}`,
-            role:      'attacker',
-            content:   raw.attack_data.metadata?.user_input ?? raw.attack_data.prompt,
-            timestamp: raw.attack_data.timestamp,
-            metadata:  raw.attack_data.metadata ?? {},
-          });
-        }
-        if (raw.defence_data) {
-          assembled.push({
-            turn_id:   `def-${raw.turn_id}`,
-            role:      'defense',
-            content:   raw.defence_data.response,
-            timestamp: raw.defence_data.timestamp,
-            metadata:  { was_blocked: raw.defence_data.was_blocked, blocked_by: raw.defence_data.metadata?.blocked_by, attack_type: raw.defence_data.metadata?.attack_type },
-          });
-        }
-        if (raw.evaluation_data) {
-          const label = raw.evaluation_data.success ? 'breached' : 'blocked';
-          assembled.push({
-            turn_id:   `eval-${raw.turn_id}`,
-            role:      'evaluation',
-            content:   raw.evaluation_data.feedback,
-            timestamp: raw.evaluation_data.timestamp,
-            metadata:  { label, score: raw.evaluation_data.score, category: raw.evaluation_data.category },
-          });
-        }
-      }
+      const assembled = assembleChatTurns(history.turns ?? []);
       const full: ChatSession = { ...history.session, turns: assembled };
       updateSession(sess.session_id, full);
       setActiveSession(full);
