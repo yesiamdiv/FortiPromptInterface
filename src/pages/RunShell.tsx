@@ -184,12 +184,14 @@ const RunShell: React.FC = () => {
 
     hydrateData();
 
-    // Join the WS run room
+    // Join the WS run room.
+    // NOTE: Cleanup does NOT call leaveRun — React StrictMode double-mounts in
+    // development, causing the cleanup to fire before the second mount's guard
+    // (hydratedForRef) can re-join the room.  Room membership is harmless; the
+    // server's disconnect handler cleans up stale SIDs.
     websocketService.joinRun(runId);
     return () => {
-      websocketService.leaveRun(runId);
-      // Reset hydratedForRef so navigation to same runId from outside re-hydrates
-      // We intentionally do NOT reset here so tab switches don't re-hydrate.
+      // No websocketService.leaveRun here — see above.
     };
   // Only re-run when runId changes (not on every render)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -255,6 +257,9 @@ const RunShell: React.FC = () => {
     setStarting(true);
 
     try {
+      // Ensure we're in the WS room before starting (defensive re-join)
+      websocketService.joinRun(runId);
+
       // Flush pending params if any
       if (pendingUpdate) {
         setSaving(true);
