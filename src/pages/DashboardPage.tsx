@@ -1,3 +1,16 @@
+/**
+ * DashboardPage — run list + three-step create-run wizard.
+ *
+ * Steps: (1) choose run type (auto/manual/batch),
+ *        (2) pick strategy + nodes,
+ *        (3) review & create.
+ *
+ * Strategy auto-selection (run-mode aware):
+ *   manual → picks strategy named "manual"
+ *   batch  → picks strategy named "batch"
+ *   auto   → picks the first available strategy
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
