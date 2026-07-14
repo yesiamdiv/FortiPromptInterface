@@ -3,11 +3,8 @@ import { create } from 'zustand';
 import {
   Run,
   AttackPrompt,
-  AttackStats,
   DefenseResponse,
-  DefenseStats,
   EvalResult,
-  EvalStats,
   ComponentType,
   ComponentLabel,
   RunProgress,
@@ -52,19 +49,16 @@ interface AppState {
 
   // Attack
   attackPrompts: AttackPrompt[];
-  attackStats:   AttackStats | null;
   isAttacking:   boolean;
   attackError:   string | null;
 
   // Defense
   defenseResponses: DefenseResponse[];
-  defenseStats:     DefenseStats | null;
   isEvaluating:     boolean;
   defenseError:     string | null;
 
   // Evaluation
   evalResults: EvalResult[];
-  evalStats:   EvalStats | null;
 
   // Connection
   connectionStatus: 'idle' | 'testing' | 'connected' | 'failed';
@@ -88,7 +82,6 @@ interface AppState {
   setAttackPrompts:   (prompts: AttackPrompt[]) => void;
   addAttackPrompt:    (prompt: AttackPrompt)    => void;
   clearAttackPrompts: ()                         => void;
-  setAttackStats:     (stats: AttackStats)       => void;
   setIsAttacking:     (v: boolean)               => void;
   setAttackError:     (msg: string | null)       => void;
 
@@ -96,7 +89,6 @@ interface AppState {
   setDefenseResponses:   (responses: DefenseResponse[]) => void;
   addDefenseResponse:    (response: DefenseResponse)    => void;
   clearDefenseResponses: ()                              => void;
-  setDefenseStats:       (stats: DefenseStats)           => void;
   setIsEvaluating:       (v: boolean)                    => void;
   setDefenseError:       (msg: string | null)            => void;
 
@@ -104,7 +96,6 @@ interface AppState {
   addEvalResult:     (result: EvalResult) => void;
   setEvalResults:    (results: EvalResult[]) => void;
   clearEvalResults:  ()                      => void;
-  setEvalStats:      (stats: EvalStats)      => void;
 
   // ── Connection ────────────────────────────────────────────────────────────────
   setConnectionStatus: (s: 'idle' | 'testing' | 'connected' | 'failed') => void;
@@ -130,17 +121,14 @@ export const useAppStore = create<AppState>((set) => ({
   runDiscovery: defaultDiscovery,
 
   attackPrompts: [],
-  attackStats:   null,
   isAttacking:   false,
   attackError:   null,
 
   defenseResponses: [],
-  defenseStats:     null,
   isEvaluating:     false,
   defenseError:     null,
 
   evalResults: [],
-  evalStats:   null,
 
   connectionStatus: 'idle',
 
@@ -178,7 +166,6 @@ export const useAppStore = create<AppState>((set) => ({
     return { attackPrompts: [...s.attackPrompts, prompt] };
   }),
   clearAttackPrompts: () => set({ attackPrompts: [] }),
-  setAttackStats:    (attackStats)   => set({ attackStats }),
   setIsAttacking:    (isAttacking)   => set({ isAttacking }),
   setAttackError:    (attackError)   => set({ attackError }),
 
@@ -189,7 +176,6 @@ export const useAppStore = create<AppState>((set) => ({
     return { defenseResponses: [...s.defenseResponses, response] };
   }),
   clearDefenseResponses: ()                 => set({ defenseResponses: [] }),
-  setDefenseStats:       (defenseStats)     => set({ defenseStats }),
   setIsEvaluating:       (isEvaluating)     => set({ isEvaluating }),
   setDefenseError:       (defenseError)     => set({ defenseError }),
 
@@ -213,7 +199,6 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   setEvalResults:   (evalResults) => set({ evalResults }),
   clearEvalResults: ()            => set({ evalResults: [] }),
-  setEvalStats:     (evalStats)   => set({ evalStats }),
 
   // Connection
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
@@ -224,15 +209,12 @@ export const useAppStore = create<AppState>((set) => ({
     runProgress:      null,
     runDiscovery:     defaultDiscovery,
     attackPrompts:    [],
-    attackStats:      null,
     isAttacking:      false,
     attackError:      null,
     defenseResponses: [],
-    defenseStats:     null,
     isEvaluating:     false,
     defenseError:     null,
     evalResults:      [],
-    evalStats:        null,
     connectionStatus: 'idle',
   }),
 }));

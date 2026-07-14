@@ -1,8 +1,10 @@
 // pages/DefenseTestingPage.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shield, AlertTriangle } from 'lucide-react';
 import { DefenseResponse, DefenseEvaluation } from '../types';
 import { useAppStore } from '../store/appStore';
+import { fetchRunStats } from '../services/api';
+import StatsPanel from '../components/stats/StatsPanel';
 
 interface DefenseTestingPageProps { embedded?: boolean; }
 
@@ -14,21 +16,30 @@ const EVAL_CFG: Record<DefenseEvaluation, { label: string; bg: string; color: st
 
 const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
   const defenseResponses      = useAppStore(s => s.defenseResponses);
-  const defenseStats          = useAppStore(s => s.defenseStats);
   const isEvaluating          = useAppStore(s => s.isEvaluating);
   const defenseError          = useAppStore(s => s.defenseError);
   const clearDefenseResponses = useAppStore(s => s.clearDefenseResponses);
   const setDefenseError       = useAppStore(s => s.setDefenseError);
+  const activeRunId           = useAppStore(s => s.activeRunId);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  // Derive stats from the store when WS stats haven't arrived yet
-  const total   = defenseStats?.totalResponses ?? defenseResponses.length;
-  const blocked = defenseStats?.blockedCount   ?? defenseResponses.filter(r => r.was_blocked).length;
-  const passed  = defenseStats?.passedCount    ?? defenseResponses.filter(r => !r.was_blocked).length;
-  const score   = defenseStats?.overallDefenseScore
-    ?? (defenseResponses.length > 0 ? Math.round((defenseResponses.filter(r => r.was_blocked).length / defenseResponses.length) * 100) : null);
-  const scoreColor = score == null ? '#CCC' : score >= 85 ? '#22C55E' : score >= 65 ? '#F59E0B' : '#EF4444';
+  useEffect(() => {
+    if (!isEvaluating && activeRunId && defenseResponses.length > 0) {
+      setStatsLoading(true);
+      fetchRunStats(activeRunId).then(s => {
+        setStats(s);
+      }).finally(() => setStatsLoading(false));
+    } else if (isEvaluating) {
+      setStats(null);
+    }
+  }, [isEvaluating, activeRunId]);
+
+  const total   = defenseResponses.length;
+  const blockedCount = defenseResponses.filter(r => r.was_blocked).length;
+  const passedCount  = defenseResponses.filter(r => !r.was_blocked).length;
 
   const displayed = [...defenseResponses].reverse();
 
@@ -75,27 +86,17 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
         </div>
       )}
 
-      {/* ── Stat chips ── */}
-      <div style={{ padding: '16px 24px 0', display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
-        {[
-          { label: 'Total',   val: total,   color: '#1A1A1A' },
-          { label: 'Blocked', val: blocked, color: '#15803D' },
-          { label: 'Passed',  val: passed,  color: '#DC2626' },
-        ].map(({ label, val, color }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-            <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: total > 0 ? color : '#DDD' }}>
-              {total > 0 ? val : '—'}
-            </span>
-            <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
-          </div>
-        ))}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: `1px solid ${score != null ? scoreColor + '40' : '#E8E6E0'}`, borderRadius: 8 }}>
-          <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: scoreColor }}>
-            {score != null ? `${score}%` : '—'}
-          </span>
-          <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Block Rate</span>
-        </div>
-      </div>
+      {/* ── Stats ── */}
+      {stats && !isEvaluating && (
+        <StatsPanel
+          chips={[
+            { label: 'Total', value: stats.total_defences, color: '#555' },
+            { label: 'Blocked', value: stats.blocked_defences, color: '#15803D' },
+            { label: 'Passed', value: stats.passed_defences, color: '#DC2626' },
+          ]}
+          loading={false}
+        />
+      )}
 
       {/* ── Response feed ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>

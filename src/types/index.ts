@@ -115,12 +115,6 @@ export interface AttackPrompt {
   metadata?: Record<string, any>;
 }
 
-export interface AttackStats {
-  totalPrompts: number;
-  pendingAttacks: number;
-  attacksGenerated: number;
-}
-
 // ─── Defense ──────────────────────────────────────────────────────────────────
 
 export type DefenseEvaluation = 'blocked' | 'passed' | 'failed_filter';
@@ -153,19 +147,6 @@ export interface DefenseResponse {
   timestamp: string;
 }
 
-export interface FilterPerformance {
-  blocked: number;
-  falsePositives: number;
-}
-
-export interface DefenseStats {
-  totalResponses: number;
-  blockedCount: number;
-  passedCount: number;
-  overallDefenseScore: number;
-  filterPerformance?: Record<string, FilterPerformance>;
-}
-
 // ─── Evaluation ───────────────────────────────────────────────────────────────
 
 export type EvalVerdict = 'breach' | 'defended' | 'partial';
@@ -174,27 +155,31 @@ export type EvalVerdict = 'breach' | 'defended' | 'partial';
  * Result from the evaluation node.
  * Contains both the original attack prompt and defense response for context.
  */
+export interface EvalDetail {
+  verdict?: string;
+  ttb?: number;
+  latencyMs?: number;
+  sessionStatus?: string;
+  labels?: {
+    intent_harm?: any;
+    response_harm?: any;
+    refusal?: any;
+  };
+}
+
 export interface EvalResult {
   evalId: string;
   promptId: string;
   verdict: EvalVerdict;
   score: number;           // 0–1, higher = more successful attack
-  reasoning: string;       // evaluator explanation
+  reasoning: string;       // evaluator explanation (short summary)
   timestamp: string;
+  evaluationDetail?: EvalDetail;
   // Denormalised context for display (populated from linked attack/defense data)
   attackContent?: string;
   defenseContent?: string;
   was_blocked?: boolean;
   attack_type?: string;
-}
-
-export interface EvalStats {
-  total: number;
-  breaches: number;
-  defended: number;
-  partial: number;
-  averageScore: number;
-  breachRate: number;       // 0–1
 }
 
 // ─── WebSocket Events ──────────────────────────────────────────────────────────
@@ -244,13 +229,6 @@ export interface WSDefenseResponseGenerated {
     timestamp?: string;
   };
 }
-export interface WSAttackStats {
-  run_id: string; stats: AttackStats;
-}
-export interface WSDefenseStats {
-  run_id: string; stats: DefenseStats;
-}
-
 /**
  * Fired by the evaluation node after each attack-defense cycle.
  * Suggested new backend event — see API_DOCS.md.
@@ -265,10 +243,7 @@ export interface WSEvalResult {
     category?: string;
     reasoning?: string;
     summary?: string;
+    metadata?: Record<string, any>;
     timestamp?: string;
   };
-}
-export interface WSEvalStats {
-  run_id: string;
-  stats: EvalStats;
 }

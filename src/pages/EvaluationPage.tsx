@@ -1,8 +1,10 @@
 // pages/EvaluationPage.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart2, ChevronDown, ChevronRight, Zap, Shield, AlertTriangle } from 'lucide-react';
 import { EvalResult, EvalVerdict } from '../types';
 import { useAppStore } from '../store/appStore';
+import { fetchRunStats, fetchRunCharts } from '../services/api';
+import StatsPanel from '../components/stats/StatsPanel';
 
 interface EvaluationPageProps { embedded?: boolean; }
 
@@ -12,47 +14,29 @@ const VERDICT_CFG: Record<EvalVerdict, { label: string; icon: React.ReactNode; b
   partial:  { label: 'Partial',  icon: <AlertTriangle size={10}/>, bg: '#FFFBEB', color: '#B45309', border: '#FCD34D', dot: '#F59E0B' },
 };
 
-const ScoreBar: React.FC<{ score: number; verdict: EvalVerdict }> = ({ score, verdict }) => {
-  const cfg   = VERDICT_CFG[verdict];
-  const width = Math.round(score * 100);
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ flex: 1, height: 3, background: '#F0EDE6', borderRadius: 2 }}>
-        <div style={{ width: `${width}%`, height: '100%', background: cfg.dot, borderRadius: 2, transition: 'width .3s' }}/>
-      </div>
-      <span style={{ fontSize: 10, fontFamily: 'DM Mono,monospace', color: cfg.color, minWidth: 28, textAlign: 'right' as const }}>
-        {width}%
-      </span>
-    </div>
-  );
-};
-
 const EvaluationPage: React.FC<EvaluationPageProps> = () => {
   const evalResults      = useAppStore(s => s.evalResults);
-  const evalStats        = useAppStore(s => s.evalStats);
   const isAttacking      = useAppStore(s => s.isAttacking);
   const clearEvalResults = useAppStore(s => s.clearEvalResults);
+  const activeRunId      = useAppStore(s => s.activeRunId);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  // Always derive stats from both the server-sent stats and the local store items.
-  // Server stats are authoritative when present; fall back to counting store items.
-  // This ensures numbers are never stale whether live or after reload.
-  const localBreaches = evalResults.filter(r => r.verdict === 'breach').length;
-  const localDefended = evalResults.filter(r => r.verdict === 'defended').length;
-  const localPartial  = evalResults.filter(r => r.verdict === 'partial').length;
-  const localTotal    = evalResults.length;
-  const localAvg      = localTotal > 0
-    ? evalResults.reduce((a, r) => a + r.score, 0) / localTotal
-    : null;
-
-  const total      = evalStats?.total    ?? localTotal;
-  const breaches   = evalStats?.breaches ?? localBreaches;
-  const defended   = evalStats?.defended ?? localDefended;
-  const partial    = evalStats?.partial  ?? localPartial;
-  const avgScore   = evalStats?.averageScore ?? localAvg;
-  const breachRate = total > 0 ? Math.round((breaches / total) * 100) : null;
-  const breachRateColor = breachRate == null ? '#CCC' : breachRate <= 20 ? '#22C55E' : breachRate <= 50 ? '#F59E0B' : '#EF4444';
+  useEffect(() => {
+    if (!isAttacking && activeRunId && evalResults.length > 0) {
+      setStatsLoading(true);
+      Promise.all([
+        fetchRunStats(activeRunId),
+        fetchRunCharts(activeRunId),
+      ]).then(([s, c]) => {
+        setStats({ ...s, charts: c.charts });
+      }).finally(() => setStatsLoading(false));
+    } else if (isAttacking) {
+      setStats(null);
+    }
+  }, [isAttacking, activeRunId]);
 
   const displayed = [...evalResults].reverse();
 
@@ -90,50 +74,19 @@ const EvaluationPage: React.FC<EvaluationPageProps> = () => {
         )}
       </div>
 
-      {/* ── Stat chips ── */}
-      <div style={{ padding: '16px 24px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {[
-            { label: 'Total',    val: String(total),    color: '#1A1A1A' },
-            { label: 'Breaches', val: String(breaches), color: '#DC2626' },
-            { label: 'Defended', val: String(defended), color: '#15803D' },
-            { label: 'Partial',  val: String(partial),  color: '#B45309' },
-          ].map(({ label, val, color }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-              <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: total > 0 ? color : '#DDD' }}>
-                {total > 0 ? val : '—'}
-              </span>
-              <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
-            </div>
-          ))}
-
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: `1px solid ${breachRate != null ? breachRateColor + '50' : '#E8E6E0'}`, borderRadius: 8 }}>
-            <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: breachRateColor }}>
-              {breachRate != null ? `${breachRate}%` : '—'}
-            </span>
-            <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Breach Rate</span>
-          </div>
-
-          {avgScore != null && (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-              <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: '#555' }}>
-                {Math.round(avgScore * 100)}%
-              </span>
-              <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Avg Score</span>
-            </div>
-          )}
-        </div>
-
-        {total > 0 && (
-          <div style={{ marginTop: 10, height: 4, background: '#F0FDF4', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', height: '100%' }}>
-              <div style={{ width: `${(breaches / total) * 100}%`, background: '#EF4444', transition: 'width .4s' }}/>
-              <div style={{ width: `${(partial  / total) * 100}%`, background: '#F59E0B', transition: 'width .4s' }}/>
-              <div style={{ flex: 1, background: '#22C55E' }}/>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* ── Stats ── */}
+      {stats && !isAttacking && (
+        <StatsPanel
+          chips={[
+            { label: 'Total', value: stats.total_evaluations, color: '#555' },
+            { label: 'Breaches', value: stats.breaches, color: '#DC2626' },
+            { label: 'Defended', value: stats.defended, color: '#15803D' },
+            { label: 'Breach Rate', value: `${(stats.breach_rate * 100).toFixed(1)}%`, color: '#6366F1' },
+          ]}
+          charts={stats.charts}
+          loading={false}
+        />
+      )}
 
       {/* ── Results list (scrollable) ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>
@@ -189,11 +142,7 @@ const EvaluationPage: React.FC<EvaluationPageProps> = () => {
                       {cfg.icon}{cfg.label}
                     </span>
 
-                    <div style={{ flex: 1 }}>
-                      <ScoreBar score={r.score} verdict={r.verdict} />
-                    </div>
-
-                    <div style={{ fontSize: 11, color: '#888', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, color: '#888', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {r.reasoning}
                     </div>
 
@@ -210,14 +159,52 @@ const EvaluationPage: React.FC<EvaluationPageProps> = () => {
 
                   {isExp && (
                     <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {r.reasoning && (
-                        <div style={{ fontSize: 12, color: '#555', lineHeight: 1.6, padding: '10px 12px', background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 8 }}>
-                          <div style={{ fontSize: 10, fontWeight: 600, color: cfg.color, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '.3px' }}>
-                            Evaluator Reasoning
-                          </div>
-                          {r.reasoning}
+                      {/* Structured evaluation details */}
+                      <div style={{ padding: '10px 12px', background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: cfg.color, marginBottom: 7, textTransform: 'uppercase', letterSpacing: '.3px' }}>
+                          Evaluation Details
                         </div>
-                      )}
+
+                        {/* Reasoning summary */}
+                        {r.reasoning && (
+                          <div style={{ fontSize: 11, color: cfg.color, fontWeight: 500, marginBottom: 8, fontFamily: 'DM Mono,monospace' }}>
+                            {r.reasoning}
+                          </div>
+                        )}
+
+                        {/* Labels from metadata */}
+                        {r.evaluationDetail?.labels && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                            {Object.entries(r.evaluationDetail.labels).map(([key, val]) => (
+                              <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 12, fontSize: 10, background: '#fff', border: '1px solid #E8E6E0', color: '#666' }}>
+                                <span style={{ color: '#999', fontWeight: 500 }}>{key}</span>
+                                <span style={{ fontWeight: 600, color: val === true || val === 'True' ? '#DC2626' : val === false || val === 'None' || val === 'False' ? '#22C55E' : '#888' }}>
+                                  {String(val)}
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Verdict, TTB, latency row */}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {r.evaluationDetail?.verdict && (
+                            <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 12, background: '#fff', border: '1px solid #E8E6E0', color: '#555', fontWeight: 600 }}>
+                              {r.evaluationDetail.verdict}
+                            </span>
+                          )}
+                          {r.evaluationDetail?.ttb !== undefined && r.evaluationDetail.ttb !== null && (
+                            <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 12, background: '#fff', border: '1px solid #E8E6E0', color: '#555' }}>
+                              TTB: {r.evaluationDetail.ttb}
+                            </span>
+                          )}
+                          {r.evaluationDetail?.latencyMs && (
+                            <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 12, background: '#fff', border: '1px solid #E8E6E0', color: '#555' }}>
+                              {r.evaluationDetail.latencyMs}ms
+                            </span>
+                          )}
+                        </div>
+                      </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: r.attackContent && r.defenseContent ? '1fr 1fr' : '1fr', gap: 10 }}>
                         {r.attackContent && (

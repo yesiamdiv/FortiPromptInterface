@@ -2,9 +2,11 @@
 // Execution dashboard only — no config, no start button (RunShell handles start).
 // Two sections: 1) stat chips  2) indexed prompt list with expand-on-click.
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AttackPrompt, AttackStatus } from '../types';
 import { useAppStore } from '../store/appStore';
+import { fetchRunStats } from '../services/api';
+import StatsPanel from '../components/stats/StatsPanel';
 
 interface AttackTestingPageProps { embedded?: boolean; }
 
@@ -18,26 +20,27 @@ const STATUS_CFG: Record<AttackStatus, { label: string; bg: string; color: strin
 
 const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false }) => {
   const attackPrompts    = useAppStore(s => s.attackPrompts);
-  const attackStats      = useAppStore(s => s.attackStats);
   const isAttacking      = useAppStore(s => s.isAttacking);
   const attackError      = useAppStore(s => s.attackError);
   const runProgress      = useAppStore(s => s.runProgress);
   const clearAttackPrompts = useAppStore(s => s.clearAttackPrompts);
   const setAttackError   = useAppStore(s => s.setAttackError);
+  const activeRunId      = useAppStore(s => s.activeRunId);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const statItems = attackStats
-    ? [
-        { label: 'Total',     val: attackStats.totalPrompts,     color: '#1A1A1A' },
-        { label: 'Generated', val: attackStats.attacksGenerated, color: '#1D4ED8' },
-        { label: 'Pending',   val: attackStats.pendingAttacks,   color: '#B45309' },
-        { label: 'Breached',  val: attackPrompts.filter(p => p.status === 'breached').length, color: '#DC2626' },
-        { label: 'Blocked',   val: attackPrompts.filter(p => p.status === 'blocked').length,  color: '#15803D' },
-      ]
-    : null;
+  useEffect(() => {
+    if (!isAttacking && activeRunId && attackPrompts.length > 0) {
+      setStatsLoading(true);
+      fetchRunStats(activeRunId).then(s => {
+        setStats(s);
+      }).finally(() => setStatsLoading(false));
+    } else if (isAttacking) {
+      setStats(null);
+    }
+  }, [isAttacking, activeRunId]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif" }}>
@@ -83,32 +86,9 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
         </div>
       )}
 
-      {/* ── Section 1: Stat chips ── */}
+      {/* ── Progress bar ── */}
       <div style={{ padding: '16px 24px 0' }}>
-        {statItems ? (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {statItems.map(({ label, val, color }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-                <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color }}>{val}</span>
-                <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
-              </div>
-            ))}
-            {/* Progress bar when running */}
-            {isAttacking && attackStats && attackStats.totalPrompts > 0 && (
-              <div style={{ flex: '1 1 100%', marginTop: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#BBB', marginBottom: 4 }}>
-                  <span>Progress</span>
-                  <span style={{ fontFamily: 'DM Mono,monospace' }}>
-                    {Math.round((attackStats.attacksGenerated / attackStats.totalPrompts) * 100)}%
-                  </span>
-                </div>
-                <div style={{ height: 3, background: '#E8E6E0', borderRadius: 2 }}>
-                  <div style={{ height: '100%', width: `${(attackStats.attacksGenerated / attackStats.totalPrompts) * 100}%`, background: '#3B82F6', borderRadius: 2, transition: 'width .4s' }}/>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : runProgress ? (
+        {runProgress ? (
           <div style={{ padding: '10px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>{runProgress.message}</div>
             <div style={{ height: 3, background: '#E8E6E0', borderRadius: 2 }}>
@@ -118,17 +98,18 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
               {runProgress.current} / {runProgress.total}
             </div>
           </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 8 }}>
-            {['Total', 'Generated', 'Pending', 'Breached', 'Blocked'].map(l => (
-              <div key={l} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#F7F6F3', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-                <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: '#DDD' }}>—</span>
-                <span style={{ fontSize: 10, color: '#CCC', textTransform: 'uppercase', letterSpacing: '.3px' }}>{l}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        ) : null}
       </div>
+
+      {/* ── Stats ── */}
+      {stats && !isAttacking && (
+        <StatsPanel
+          chips={[
+            { label: 'Total', value: stats.total_attacks, color: '#555' },
+          ]}
+          loading={false}
+        />
+      )}
 
       {/* ── Section 2: Prompt list ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>

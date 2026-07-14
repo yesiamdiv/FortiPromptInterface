@@ -12,8 +12,7 @@ import { useManualStore } from '../store/manualStore';
 import {
   WSNewRunAvailable, WSRunStarted, WSRunProgress, WSRunCompleted,
   WSRunError, WSAttackGenerated, WSDefenseResponseGenerated,
-  WSEvalResult, WSEvalStats, WSDefenseStats, WSAttackStats,
-  EvalResult,
+  WSEvalResult,
 } from '../types';
 
 import {
@@ -157,14 +156,13 @@ class WebSocketService {
     // ── Evaluation node ────────────────────────────────────────────────────────
     // Suggested new backend events — see API_DOCS.md for implementation spec.
 
-    s.on('evaluation_result', (data: WSEvalResult) => {
+    function buildEvalResult(data: WSEvalResult) {
       const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
-      // Dedup: if evaluation_complete fires for the same turn, skip
       if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
-      // Cross-join with already-stored attack prompt and defense response
       const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
       const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
+      const meta = data.evaluation.metadata;
       addEvalResult({
         evalId:         data.turn_id,
         promptId:       data.turn_id,
@@ -176,35 +174,19 @@ class WebSocketService {
         defenseContent: matchedDefence?.defenseResponse,
         was_blocked:    matchedDefence?.was_blocked,
         attack_type:    matchedDefence?.attack_type,
+        evaluationDetail: meta ? {
+          verdict:       meta.verdict,
+          ttb:           meta.ttb,
+          latencyMs:     meta.latency_ms,
+          sessionStatus: meta.session_status,
+          labels:        meta.turn_labels,
+        } : undefined,
       });
-    });
+    }
 
-    // Also listen under the alternate event name the backend may use
-    s.on('evaluation_complete', (data: WSEvalResult) => {
-      const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
-      if (activeRunId !== data.run_id) return;
-      if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
-      const matchedAttack  = attackPrompts.find(a => a.promptId === data.turn_id);
-      const matchedDefence = defenseResponses.find(d => d.promptId === data.turn_id);
-      addEvalResult({
-        evalId:         data.turn_id,
-        promptId:       data.turn_id,
-        verdict:        data.evaluation.success ? 'breach' : 'defended',
-        score:          data.evaluation.score ?? 0,
-        reasoning:      data.evaluation.reasoning ?? '',
-        timestamp:      data.evaluation.timestamp ?? new Date().toISOString(),
-        attackContent:  matchedAttack?.content,
-        defenseContent: matchedDefence?.defenseResponse,
-        was_blocked:    matchedDefence?.was_blocked,
-        attack_type:    matchedDefence?.attack_type,
-      });
-    });
+    s.on('evaluation_result', buildEvalResult);
+    s.on('evaluation_complete', buildEvalResult);
 
-    s.on('evaluation_stats_updated', (data: WSEvalStats) => {
-      const { setEvalStats, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.run_id) return;
-      setEvalStats(data.stats);
-    });
   }
 
   private setupManualRunEvents(): void {
@@ -249,12 +231,24 @@ class WebSocketService {
       const label   = data.evaluation.label ?? (data.evaluation.success ? 'breached' : 'blocked');
       const score   = data.evaluation.score;
       const reasoning = data.evaluation.reasoning ?? '';
+      const meta = data.evaluation.metadata;
       appendTurnToActiveSession({
         turn_id:   `eval-${data.turn_id}`,
         role:      'evaluation',
         content:   reasoning,
         timestamp: new Date().toISOString(),
-        metadata:  { label, score, ...data.evaluation },
+        metadata:  {
+          label,
+          score,
+          ...data.evaluation,
+          evalDetails: meta ? {
+            verdict:       meta.verdict,
+            ttb:           meta.ttb,
+            latencyMs:     meta.latency_ms,
+            sessionStatus: meta.session_status,
+            labels:        meta.turn_labels,
+          } : undefined,
+        },
       });
     });
 

@@ -8,7 +8,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Zap, Shield, MessageSquare, ArrowLeft, Play, Pause, BarChart2, Lock } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
-import { updateRun as updateRunApi, fetchRun, startAutomaticRun, stopRun, fetchRunAttacks, fetchRunDefences, fetchRunEvaluations, fetchRunStats } from '../services/api';
+import { updateRun as updateRunApi, fetchRun, startAutomaticRun, stopRun, fetchRunAttacks, fetchRunDefences, fetchRunEvaluations } from '../services/api';
 import { UpdateRunRequest } from '../types';
 import RunConfigPanel from '../components/RunConfigPanel';
 import AttackTestingPage from './AttackTestingPage';
@@ -62,8 +62,6 @@ const RunShell: React.FC = () => {
   const addAttackPrompt    = useAppStore(s => s.addAttackPrompt);
   const addDefenseResponse = useAppStore(s => s.addDefenseResponse);
   const addEvalResult      = useAppStore(s => s.addEvalResult);
-  const setEvalStats       = useAppStore(s => s.setEvalStats);
-  const setDefenseStats    = useAppStore(s => s.setDefenseStats);
 
   const [saving,   setSaving]   = useState(false);
   const [starting, setStarting] = useState(false);
@@ -109,12 +107,11 @@ const RunShell: React.FC = () => {
       const isManualRun = run?.config?.graph_type === 'manual';
       if (!run || isManualRun) return;
 
-      // Fetch attack, defence, evaluation data + stats in parallel
-      const [attacks, defences, evaluations, stats] = await Promise.allSettled([
+      // Fetch attack, defence, evaluation data in parallel
+      const [attacks, defences, evaluations] = await Promise.allSettled([
         fetchRunAttacks(runId),
         fetchRunDefences(runId),
         fetchRunEvaluations(runId),
-        fetchRunStats(runId),
       ]);
 
       if (attacks.status === 'fulfilled') {
@@ -162,24 +159,6 @@ const RunShell: React.FC = () => {
         }
       }
 
-      if (stats.status === 'fulfilled') {
-        const s = stats.value;
-        const total = s.total_evaluations ?? 0;
-        setEvalStats({
-          total,
-          breaches:     total ? Math.round((s.success_rate  ?? 0) * total) : 0,
-          defended:     total ? total - Math.round((s.success_rate ?? 0) * total) : 0,
-          partial:      0,
-          averageScore: s.average_score ?? 0,
-          breachRate:   s.success_rate  ?? 0,
-        });
-        setDefenseStats({
-          totalResponses:      s.total_defences ?? 0,
-          blockedCount:        total ? Math.round((s.blocked_rate ?? 0) * total) : 0,
-          passedCount:         total ? total - Math.round((s.blocked_rate ?? 0) * total) : 0,
-          overallDefenseScore: s.blocked_rate != null ? Math.round(s.blocked_rate * 100) : 0,
-        });
-      }
     };
 
     hydrateData();

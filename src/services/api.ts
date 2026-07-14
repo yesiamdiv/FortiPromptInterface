@@ -199,6 +199,10 @@ export const fetchRunEvaluations = async (runId: string) => {
 export const fetchRunStats = (runId: string) =>
   apiFetch<any>(`${BASE_URL}/runs/${runId}/stats`);
 
+/** GET /runs/{runId}/stats/charts */
+export const fetchRunCharts = (runId: string) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/stats/charts`);
+
 // =============================================================================
 // MANUAL EXECUTION
 // =============================================================================
