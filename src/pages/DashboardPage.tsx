@@ -159,7 +159,7 @@ const DashboardPage: React.FC = () => {
         if (attackNodes.length > 0 && selectedAttackNode === 'none') setSelectedAttackNode(attackNodes[0].node_name);
         if (defenseNodes.length > 0 && selectedDefenseNode === 'none') setSelectedDefenseNode(defenseNodes[0].node_name);
         if (evalNodes.length > 0 && selectedEvaluationNode === 'none') setSelectedEvaluationNode(evalNodes[0].node_name);
-        if (strats.length > 0 && selectedStrategy === 'none') setSelectedStrategy(strats[0].strategy_name);
+        autoSelectStrategy(runMode, strats);
 
         // Seed default param values from schemas so they are sent on create
         // even if the user never touches the sliders
@@ -194,18 +194,22 @@ const DashboardPage: React.FC = () => {
 
   // ── Mode toggle ───────────────────────────────────────────────────────────
 
+  const autoSelectStrategy = useCallback((mode: RunMode, strats: StrategySchema[]) => {
+    if (strats.length === 0) return;
+    if (mode === 'manual') {
+      const m = strats.find(s => s.strategy_name === 'manual');
+      if (m) { setSelectedStrategy('manual'); return; }
+    }
+    if (mode === 'batch') {
+      const b = strats.find(s => s.strategy_name === 'batch');
+      if (b) { setSelectedStrategy('batch'); return; }
+    }
+    setSelectedStrategy(strats[0].strategy_name);
+  }, []);
+
   const handleModeChange = (mode: RunMode) => {
     setRunMode(mode);
-    // Auto-select the first available strategy for all modes.
-    // For manual mode, prefer a strategy named 'manual' if it exists, else first.
-    if (mode === 'manual') {
-      const manualStrat = strategies.find(s => s.strategy_name === 'manual');
-      const firstStrat  = strategies[0];
-      if (manualStrat)     setSelectedStrategy('manual');
-      else if (firstStrat) setSelectedStrategy(firstStrat.strategy_name);
-      // else keep current selection — strategies may not be loaded yet (wizard step 1)
-    }
-    // For automatic/batch: keep current selection; auto-selection happens in config step
+    autoSelectStrategy(mode, strategies);
   };
 
   // ── Wizard navigation ─────────────────────────────────────────────────────
