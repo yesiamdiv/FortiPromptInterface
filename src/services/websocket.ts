@@ -30,6 +30,7 @@ class WebSocketService {
     this.socket = io(url, {
       path: '/socket.io',  // explicit — matches backend mount
       auth: authToken ? { token: authToken } : undefined,
+      transports: ['websocket'],  // skip HTTP polling — avoids "Too many packets" errors
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
