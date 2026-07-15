@@ -342,10 +342,25 @@ const DashboardPage: React.FC = () => {
 
   // ── Export ─────────────────────────────────────────────────────────────────
 
-  const handleExport = (runId: string, e: React.MouseEvent) => {
+  const API_BASE = process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api/v1';
+
+  const handleExport = async (runId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const url = `${process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api/v1'}/runs/${runId}/export?format=json`;
-    window.open(url, '_blank');
+    try {
+      const res = await fetch(`${API_BASE}/runs/${runId}/export?format=json`);
+      if (!res.ok) { setError('Export failed'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `run_${runId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Export failed');
+    }
   };
 
   // ── Template select ───────────────────────────────────────────────────────
