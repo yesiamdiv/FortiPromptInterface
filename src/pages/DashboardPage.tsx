@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Play, Pause, Trash2, Edit, AlertCircle, MessageSquare,
+  Plus, Play, Pause, Trash2, Edit, AlertCircle, MessageSquare, Download,
   Zap, Shield, Settings, ChevronRight, Loader, RefreshCw, Layers, SlidersHorizontal,
 } from 'lucide-react';
 import { Run, ComponentType, CreateRunRequest, StrategySchema, NodeSchema, RunConfig } from '../types';
@@ -340,6 +340,14 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  // ── Export ─────────────────────────────────────────────────────────────────
+
+  const handleExport = (runId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const url = `${process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api/v1'}/runs/${runId}/export?format=json`;
+    window.open(url, '_blank');
+  };
+
   // ── Template select ───────────────────────────────────────────────────────
 
   const handleTemplateSelect = (t: typeof TEMPLATES[0]) => {
@@ -651,6 +659,9 @@ const DashboardPage: React.FC = () => {
                       Open Run
                     </button>
                     <div className="db-run-acts">
+                      <button className="db-icon-btn" onClick={e => handleExport(run.runid, e)} title="Export data">
+                        <Download size={14}/>
+                      </button>
                       <button className="db-icon-btn del" onClick={e => handleDelete(run.runid, e)}>
                         <Trash2 size={15}/>
                       </button>
