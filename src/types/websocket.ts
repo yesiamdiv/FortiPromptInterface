@@ -23,6 +23,7 @@ export interface WSNewRunAvailable {
 }
 export interface WSAttackGenerated {
   run_id: string;
+  session_id: string;
   turn_id: string;
   index: number;
   attack: {
@@ -35,6 +36,7 @@ export interface WSAttackGenerated {
 }
 export interface WSDefenseResponseGenerated {
   run_id: string;
+  session_id: string;
   turn_id: string;
   index: number;
   defence: {
@@ -56,6 +58,7 @@ export interface WSDefenseStats {
 }
 export interface WSEvalResult {
   run_id: string;
+  session_id: string;
   turn_id: string;
   index: number;
   evaluation: {
@@ -64,6 +67,7 @@ export interface WSEvalResult {
     category?: string;
     reasoning?: string;
     summary?: string;
+    metadata?: Record<string, any>;
     timestamp?: string;
   };
 }

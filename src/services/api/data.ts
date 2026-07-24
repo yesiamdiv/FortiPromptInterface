@@ -20,3 +20,7 @@ export const fetchRunEvaluations = async (runId: string) => {
   const data = await apiFetch<any>(`${BASE_URL}/runs/${runId}/evaluations`);
   return data?.evaluations ?? [];
 };
+
+/** GET /runs/{runId}/stats/charts */
+export const fetchRunCharts = (runId: string) =>
+  apiFetch<any>(`${BASE_URL}/runs/${runId}/stats/charts`);

@@ -1,7 +1,20 @@
+/**
+ * DashboardPage — run list + three-step create-run wizard.
+ *
+ * Steps: (1) choose run type (auto/manual/batch),
+ *        (2) pick strategy + nodes,
+ *        (3) review & create.
+ *
+ * Strategy auto-selection (run-mode aware):
+ *   manual → picks strategy named "manual"
+ *   batch  → picks strategy named "batch"
+ *   auto   → picks the first available strategy
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Play, Pause, Trash2, Edit, AlertCircle, MessageSquare,
+  Plus, Play, Pause, Trash2, Edit, AlertCircle, MessageSquare, Download,
   Zap, Shield, Settings, ChevronRight, Loader, RefreshCw, Layers, SlidersHorizontal,
 } from 'lucide-react';
 import { Run, ComponentType, CreateRunRequest, StrategySchema, NodeSchema, RunConfig } from '../types';
@@ -159,7 +172,7 @@ const DashboardPage: React.FC = () => {
         if (attackNodes.length > 0 && selectedAttackNode === 'none') setSelectedAttackNode(attackNodes[0].node_name);
         if (defenseNodes.length > 0 && selectedDefenseNode === 'none') setSelectedDefenseNode(defenseNodes[0].node_name);
         if (evalNodes.length > 0 && selectedEvaluationNode === 'none') setSelectedEvaluationNode(evalNodes[0].node_name);
-        if (strats.length > 0 && selectedStrategy === 'none') setSelectedStrategy(strats[0].strategy_name);
+        autoSelectStrategy(runMode, strats);
 
         // Seed default param values from schemas so they are sent on create
         // even if the user never touches the sliders
@@ -194,18 +207,22 @@ const DashboardPage: React.FC = () => {
 
   // ── Mode toggle ───────────────────────────────────────────────────────────
 
+  const autoSelectStrategy = useCallback((mode: RunMode, strats: StrategySchema[]) => {
+    if (strats.length === 0) return;
+    if (mode === 'manual') {
+      const m = strats.find(s => s.strategy_name === 'manual');
+      if (m) { setSelectedStrategy('manual'); return; }
+    }
+    if (mode === 'batch') {
+      const b = strats.find(s => s.strategy_name === 'batch');
+      if (b) { setSelectedStrategy('batch'); return; }
+    }
+    setSelectedStrategy(strats[0].strategy_name);
+  }, []);
+
   const handleModeChange = (mode: RunMode) => {
     setRunMode(mode);
-    // Auto-select the first available strategy for all modes.
-    // For manual mode, prefer a strategy named 'manual' if it exists, else first.
-    if (mode === 'manual') {
-      const manualStrat = strategies.find(s => s.strategy_name === 'manual');
-      const firstStrat  = strategies[0];
-      if (manualStrat)     setSelectedStrategy('manual');
-      else if (firstStrat) setSelectedStrategy(firstStrat.strategy_name);
-      // else keep current selection — strategies may not be loaded yet (wizard step 1)
-    }
-    // For automatic/batch: keep current selection; auto-selection happens in config step
+    autoSelectStrategy(mode, strategies);
   };
 
   // ── Wizard navigation ─────────────────────────────────────────────────────
@@ -320,6 +337,29 @@ const DashboardPage: React.FC = () => {
       deleteRunFromStore(runId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete run');
+    }
+  };
+
+  // ── Export ─────────────────────────────────────────────────────────────────
+
+  const API_BASE = process.env.REACT_APP_API_URL ?? 'http://localhost:8000/api/v1';
+
+  const handleExport = async (runId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`${API_BASE}/runs/${runId}/export?format=json`);
+      if (!res.ok) { setError('Export failed'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `run_${runId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Export failed');
     }
   };
 
@@ -634,6 +674,9 @@ const DashboardPage: React.FC = () => {
                       Open Run
                     </button>
                     <div className="db-run-acts">
+                      <button className="db-icon-btn" onClick={e => handleExport(run.runid, e)} title="Export data">
+                        <Download size={14}/>
+                      </button>
                       <button className="db-icon-btn del" onClick={e => handleDelete(run.runid, e)}>
                         <Trash2 size={15}/>
                       </button>

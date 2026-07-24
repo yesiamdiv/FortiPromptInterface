@@ -74,7 +74,7 @@ export function useRunHydration(runId: string | undefined) {
 
       if (attacks.status === 'fulfilled') {
         for (const a of attacks.value) {
-          addAttackPrompt({
+          addAttackPrompt(a.session_id ?? `sess_${runId}`, {
             promptId:  a.turn_id,
             content:   a.prompt,
             status:    'generated',
@@ -86,7 +86,7 @@ export function useRunHydration(runId: string | undefined) {
 
       if (defences.status === 'fulfilled') {
         for (const d of defences.value) {
-          addDefenseResponse({
+          addDefenseResponse(d.session_id ?? `sess_${runId}`, {
             promptId:        d.turn_id,
             defenseResponse: d.response,
             evaluation:      d.was_blocked ? 'blocked' : 'passed',
@@ -107,7 +107,7 @@ export function useRunHydration(runId: string | undefined) {
             cat.includes('partial')  ? 'partial'  :
             e.success === true       ? 'breach'   :
             'defended';
-          addEvalResult({
+          addEvalResult(e.session_id ?? `sess_${runId}`, {
             evalId:         e.turn_id,
             promptId:       e.turn_id,
             verdict,

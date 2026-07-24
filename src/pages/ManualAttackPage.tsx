@@ -10,7 +10,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Save, Trash2, Plus, CheckCircle2, XCircle, AlertTriangle, Clock, Zap, Shield, Loader, BarChart2, MessageSquare } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useManualStore } from '../store/manualStore';
-import { fetchManualSessions, deleteManualSession, createManualSession, submitManualTurn, getManualSessionHistory, fetchRunStats } from '../services/api';
+import { fetchManualSessions, deleteManualSession, createManualSession, submitManualTurn, getManualSessionHistory } from '../services/api';
 import { websocketService } from '../services/websocket';
 import { ChatSession, ChatTurn, EvaluationLabel } from '../types';
 import { assembleChatTurns } from '../utils';
@@ -57,17 +57,45 @@ const TurnBubble: React.FC<{ turn: ChatTurn }> = ({ turn }) => {
   if (isEvaluation) {
     const label = turn.metadata?.label as EvaluationLabel | undefined;
     const score = turn.metadata?.score  as number | undefined;
+    const ed    = turn.metadata?.evalDetails as any;
     const c     = evalColor(label);
     return (
       <div style={{ alignSelf: 'center', maxWidth: '80%', margin: '2px 0' }}>
         <div style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 10, padding: '8px 12px', fontSize: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600, marginBottom: turn.content ? 4 : 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600, marginBottom: 6 }}>
             <BarChart2 size={10}/>
             Evaluation
             {label && <span style={{ fontWeight: 400 }}>· {label}</span>}
             {score != null && <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, fontWeight: 400 }}>({Math.round(score * 100)}%)</span>}
           </div>
-          {turn.content && <div style={{ fontSize: 11, opacity: .8, lineHeight: 1.5 }}>{turn.content}</div>}
+
+          {/* Reasoning summary */}
+          {turn.content && (
+            <div style={{ fontSize: 11, fontFamily: 'DM Mono,monospace', fontWeight: 500, marginBottom: 6, color: c.text }}>{turn.content}</div>
+          )}
+
+          {/* Labels from evalDetails */}
+          {ed?.labels && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 4 }}>
+              {Object.entries(ed.labels).map(([k, v]: [string, any]) => (
+                <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#fff', border: '1px solid #E8E6E0', color: '#666' }}>
+                  <span style={{ color: '#999' }}>{k}</span>
+                  <span style={{ fontWeight: 600, color: v === true || v === 'True' ? '#DC2626' : v === false || v === 'None' || v === 'False' ? '#22C55E' : '#888' }}>
+                    {String(v)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Verdict, TTB, latency */}
+          {(ed?.verdict || ed?.ttb != null || ed?.latencyMs) && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {ed?.verdict && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: '#fff', border: '1px solid #E8E6E0', color: '#555', fontWeight: 600 }}>{ed.verdict}</span>}
+              {ed?.ttb != null && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: '#fff', border: '1px solid #E8E6E0', color: '#555' }}>TTB: {ed.ttb}</span>}
+              {ed?.latencyMs && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: '#fff', border: '1px solid #E8E6E0', color: '#555' }}>{ed.latencyMs}ms</span>}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -157,29 +185,11 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
     (async () => {
       setLoading(true);
       try {
-        const [rawSess, runStats] = await Promise.all([
-          fetchManualSessions(activeRunId).catch(() => []),
-          fetchRunStats(activeRunId).catch(() => null),
-        ]);
+        const rawSess = await fetchManualSessions(activeRunId).catch(() => []);
         const sess = [...(rawSess ?? [])].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
         setSessions(sess);
-        if (runStats) {
-          setManualStats({
-            total_sessions:  sess.length,
-            saved_sessions:  sess.filter((s: any) => s.status === 'completed').length,
-            active_sessions: sess.filter((s: any) => s.status === 'active').length,
-            breach_count:    runStats.total_evaluations
-              ? Math.round((runStats.success_rate ?? 0) * runStats.total_evaluations)
-              : 0,
-            blocked_count:   runStats.total_evaluations
-              ? Math.round((runStats.blocked_rate ?? 0) * runStats.total_evaluations)
-              : 0,
-            partial_count:   0,
-            average_score:   runStats.average_score,
-          });
-        }
       } catch (e: any) { setManualError(e.message); }
       finally { setLoading(false); }
     })();
@@ -208,6 +218,12 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
 
   // ── Select session ────────────────────────────────────────────────────────────
   const handleSelectSession = async (sess: ChatSession) => {
+    // Leave previous session room to avoid stale event bleed
+    if (activeSession && activeSession.session_id !== sess.session_id) {
+      websocketService.leaveSessionRoom(activeSession.session_id);
+    }
+    // Clear any "in progress" indicator from a different session
+    setIsWaitingForResponse(false);
     setActiveSession(sess);
     setLoadingHistory(true);
     try {
@@ -263,21 +279,7 @@ const ManualAttackPage: React.FC<ManualAttackPageProps> = ({ embedded = false })
       setActiveSession({ ...activeSession, ...patch });
       setShowSaveModal(false);
       setSaveLabelInput('');
-      const runStats = await fetchRunStats(activeRunId).catch(() => null);
-      if (runStats) {
-        const currentSessions = useManualStore.getState().sessions;
-        setManualStats({
-          total_sessions:  currentSessions.length,
-          saved_sessions:  currentSessions.filter(s => s.status === 'completed').length,
-          active_sessions: currentSessions.filter(s => s.status === 'active').length,
-          breach_count:    runStats.total_evaluations
-            ? Math.round((runStats.success_rate ?? 0) * runStats.total_evaluations) : 0,
-          blocked_count:   runStats.total_evaluations
-            ? Math.round((runStats.blocked_rate ?? 0) * runStats.total_evaluations) : 0,
-          partial_count:   0,
-          average_score:   runStats.average_score,
-        });
-      }
+      // (stats refresh removed)
     } catch (e: any) { setManualError(e.message); }
     finally { setIsSavingSession(false); }
   };

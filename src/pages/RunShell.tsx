@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Zap, Shield, MessageSquare, ArrowLeft, Play, Pause, BarChart2, Lock } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
-import { updateRun as updateRunApi, startAutomaticRun, stopRun } from '../services/api';
+import { updateRun as updateRunApi, startAutomaticRun, stopRun, fetchRun, fetchRunAttacks, fetchRunDefences, fetchRunEvaluations } from '../services/api';
+import { websocketService } from '../services/websocket';
 import { UpdateRunRequest } from '../types';
 import RunConfigPanel from '../components/RunConfigPanel';
 import AttackTestingPage from './AttackTestingPage';
@@ -56,6 +57,9 @@ const RunShell: React.FC = () => {
   const clearAttackPrompts    = useAppStore(s => s.clearAttackPrompts);
   const clearDefenseResponses = useAppStore(s => s.clearDefenseResponses);
   const clearEvalResults      = useAppStore(s => s.clearEvalResults);
+  const addAttackPrompt    = useAppStore(s => s.addAttackPrompt);
+  const addDefenseResponse = useAppStore(s => s.addDefenseResponse);
+  const addEvalResult      = useAppStore(s => s.addEvalResult);
 
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -99,6 +103,9 @@ const RunShell: React.FC = () => {
     setStarting(true);
 
     try {
+      // Ensure we're in the WS room before starting (defensive re-join)
+      websocketService.joinRun(runId);
+
       // Flush any buffered param updates before starting
       await flushPending();
 

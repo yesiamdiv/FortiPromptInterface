@@ -1,8 +1,10 @@
 // pages/DefenseTestingPage.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shield, AlertTriangle } from 'lucide-react';
 import { DefenseResponse, DefenseEvaluation } from '../types';
 import { useAppStore } from '../store/appStore';
+import { fetchRunStats } from '../services/api';
+import StatsPanel from '../components/stats/StatsPanel';
 
 interface DefenseTestingPageProps { embedded?: boolean; }
 
@@ -13,24 +15,37 @@ const EVAL_CFG: Record<DefenseEvaluation, { label: string; bg: string; color: st
 };
 
 const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
-  const defenseResponses      = useAppStore(s => s.defenseResponses);
-  const defenseStats          = useAppStore(s => s.defenseStats);
+  const defenseResponses       = useAppStore(s => s.defenseResponses);
   const isAttacking           = useAppStore(s => s.isAttacking);
+  const isEvaluating          = useAppStore(s => s.isEvaluating);
   const defenseError          = useAppStore(s => s.defenseError);
   const clearDefenseResponses = useAppStore(s => s.clearDefenseResponses);
   const setDefenseError       = useAppStore(s => s.setDefenseError);
+  const activeRunId           = useAppStore(s => s.activeRunId);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  // Derive stats from the store when WS stats haven't arrived yet
-  const total   = defenseStats?.totalResponses ?? defenseResponses.length;
-  const blocked = defenseStats?.blockedCount   ?? defenseResponses.filter(r => r.was_blocked).length;
-  const passed  = defenseStats?.passedCount    ?? defenseResponses.filter(r => !r.was_blocked).length;
-  const score   = defenseStats?.overallDefenseScore
-    ?? (defenseResponses.length > 0 ? Math.round((defenseResponses.filter(r => r.was_blocked).length / defenseResponses.length) * 100) : null);
-  const scoreColor = score == null ? '#CCC' : score >= 85 ? '#22C55E' : score >= 65 ? '#F59E0B' : '#EF4444';
+  const allDefences  = Object.values(defenseResponses).flat();
+  const sessionKeys  = Object.keys(defenseResponses);
 
-  const displayed = [...defenseResponses].reverse();
+  useEffect(() => {
+    if (!isEvaluating && activeRunId && allDefences.length > 0) {
+      setStatsLoading(true);
+      fetchRunStats(activeRunId).then(s => {
+        setStats(s);
+      }).finally(() => setStatsLoading(false));
+    } else if (isEvaluating) {
+      setStats(null);
+    }
+  }, [isEvaluating, activeRunId]);
+
+  const total   = allDefences.length;
+  const blockedCount = allDefences.filter(r => r.was_blocked).length;
+  const passedCount  = allDefences.filter(r => !r.was_blocked).length;
+
+  const allReversed = [...allDefences].reverse();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif", overflow: 'hidden' }}>
@@ -56,13 +71,13 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
           <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>
             {isAttacking
               ? 'Defense node is processing attack prompts…'
-              : defenseResponses.length > 0
-              ? `${defenseResponses.length} responses received`
+              : allDefences.length > 0
+              ? `${allDefences.length} responses across ${sessionKeys.length} session(s)`
               : 'Waiting for run to start'}
           </div>
         </div>
-        {defenseResponses.length > 0 && !isAttacking && (
-          <button onClick={clearDefenseResponses} style={{ fontSize: 11, color: '#AAA', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', marginTop: 2 }}>
+        {allDefences.length > 0 && !isEvaluating && (
+          <button onClick={() => clearDefenseResponses()} style={{ fontSize: 11, color: '#AAA', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', marginTop: 2 }}>
             Clear
           </button>
         )}
@@ -75,27 +90,17 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
         </div>
       )}
 
-      {/* ── Stat chips ── */}
-      <div style={{ padding: '16px 24px 0', display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
-        {[
-          { label: 'Total',   val: total,   color: '#1A1A1A' },
-          { label: 'Blocked', val: blocked, color: '#15803D' },
-          { label: 'Passed',  val: passed,  color: '#DC2626' },
-        ].map(({ label, val, color }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 8 }}>
-            <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: total > 0 ? color : '#DDD' }}>
-              {total > 0 ? val : '—'}
-            </span>
-            <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
-          </div>
-        ))}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '8px 14px', background: '#fff', border: `1px solid ${score != null ? scoreColor + '40' : '#E8E6E0'}`, borderRadius: 8 }}>
-          <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 18, fontWeight: 500, color: scoreColor }}>
-            {score != null ? `${score}%` : '—'}
-          </span>
-          <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>Block Rate</span>
-        </div>
-      </div>
+      {/* ── Stats ── */}
+      {stats && !isEvaluating && (
+        <StatsPanel
+          chips={[
+            { label: 'Total', value: stats.total_defences, color: '#555' },
+            { label: 'Blocked', value: stats.blocked_defences, color: '#15803D' },
+            { label: 'Passed', value: stats.passed_defences, color: '#DC2626' },
+          ]}
+          loading={false}
+        />
+      )}
 
       {/* ── Response feed ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>
@@ -107,11 +112,11 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
                   <svg className="df-spin" width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="#E8E6E0" strokeWidth="1.5"/><path d="M5.5 1.5a4 4 0 0 1 4 4" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   streaming
                 </span>
-              : `${defenseResponses.length} responses`}
+              : `${allDefences.length} responses`}
           </span>
         </div>
 
-        {displayed.length === 0 ? (
+        {allDefences.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#CCC' }}>
             {isAttacking ? (
               <>
@@ -130,52 +135,64 @@ const DefenseTestingPage: React.FC<DefenseTestingPageProps> = () => {
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {displayed.map((r: DefenseResponse, i: number) => {
-              const cfg   = EVAL_CFG[r.evaluation] ?? EVAL_CFG.passed;
-              const isExp = expandedId === r.promptId;
+            {[...sessionKeys].reverse().map(sessionId => {
+              const responses = defenseResponses[sessionId];
               return (
-                <div
-                  key={r.promptId}
-                  className="df-row"
-                  style={{ padding: '13px 16px', borderBottom: '1px solid #F9F8F6', cursor: 'pointer', transition: 'background .1s' }}
-                  onClick={() => setExpandedId(isExp ? null : r.promptId)}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isExp ? 10 : 0 }}>
-                    <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0, minWidth: 20 }}>
-                      {String(displayed.length - i).padStart(2, '0')}
-                    </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, flexShrink: 0 }}>
-                      {r.was_blocked ? <Shield size={9}/> : <AlertTriangle size={9}/>}
-                      {cfg.label}
-                    </span>
-                    {r.attack_type && (
-                      <span style={{ fontSize: 10, color: '#888', background: '#F7F6F3', padding: '2px 7px', borderRadius: 10, border: '1px solid #E8E6E0' }}>
-                        {r.attack_type}
-                      </span>
-                    )}
-                    {r.was_blocked && r.blocked_by && (
-                      <span style={{ fontSize: 10, color: '#6366F1', background: '#EEF2FF', padding: '2px 7px', borderRadius: 10, border: '1px solid #C7D2FE' }}>
-                        via {r.blocked_by}
-                      </span>
-                    )}
-                    <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0 }}>
-                      {new Date(r.timestamp).toLocaleTimeString()}
-                    </span>
+                <div key={sessionId}>
+                  <div style={{ padding: '10px 16px', background: '#F7F6F3', borderBottom: '1px solid #E8E6E0', fontSize: 11, fontWeight: 600, color: '#666', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#999' }}>Session</span>
+                    {sessionId}
+                    <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#AAA' }}>{responses.length} turns</span>
                   </div>
+                  {responses.map((r: DefenseResponse, i: number) => {
+                    const cfg   = EVAL_CFG[r.evaluation] ?? EVAL_CFG.passed;
+                    const isExp = expandedId === r.promptId;
+                    return (
+                      <div
+                        key={r.promptId}
+                        className="df-row"
+                        style={{ padding: '13px 16px', borderBottom: '1px solid #F9F8F6', cursor: 'pointer', transition: 'background .1s' }}
+                        onClick={() => setExpandedId(isExp ? null : r.promptId)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isExp ? 10 : 0 }}>
+                          <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0, minWidth: 20 }}>
+                            {String(i + 1).padStart(2, '0')}
+                          </span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, flexShrink: 0 }}>
+                            {r.was_blocked ? <Shield size={9}/> : <AlertTriangle size={9}/>}
+                            {cfg.label}
+                          </span>
+                          {r.attack_type && (
+                            <span style={{ fontSize: 10, color: '#888', background: '#F7F6F3', padding: '2px 7px', borderRadius: 10, border: '1px solid #E8E6E0' }}>
+                              {r.attack_type}
+                            </span>
+                          )}
+                          {r.was_blocked && r.blocked_by && (
+                            <span style={{ fontSize: 10, color: '#6366F1', background: '#EEF2FF', padding: '2px 7px', borderRadius: 10, border: '1px solid #C7D2FE' }}>
+                              via {r.blocked_by}
+                            </span>
+                          )}
+                          <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', flexShrink: 0 }}>
+                            {new Date(r.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
 
-                  <div style={{ marginLeft: 30, fontSize: 12, color: r.was_blocked ? '#888' : '#333', fontFamily: r.was_blocked ? 'inherit' : 'DM Mono,monospace', lineHeight: 1.55, marginTop: 6 }}>
-                    {r.was_blocked ? (
-                      <span style={{ color: '#888', fontStyle: 'italic' }}>
-                        {r.defenseResponse || `Prompt intercepted and blocked${r.blocked_by ? ` by ${r.blocked_by}` : ''}.`}
-                      </span>
-                    ) : (
-                      isExp
-                        ? r.defenseResponse
-                        : r.defenseResponse.length > 100
-                        ? `${r.defenseResponse.slice(0, 100)}…`
-                        : r.defenseResponse
-                    )}
-                  </div>
+                        <div style={{ marginLeft: 30, fontSize: 12, color: r.was_blocked ? '#888' : '#333', fontFamily: r.was_blocked ? 'inherit' : 'DM Mono,monospace', lineHeight: 1.55, marginTop: 6 }}>
+                          {r.was_blocked ? (
+                            <span style={{ color: '#888', fontStyle: 'italic' }}>
+                              {r.defenseResponse || `Prompt intercepted and blocked${r.blocked_by ? ` by ${r.blocked_by}` : ''}.`}
+                            </span>
+                          ) : (
+                            isExp
+                              ? r.defenseResponse
+                              : r.defenseResponse.length > 100
+                              ? `${r.defenseResponse.slice(0, 100)}…`
+                              : r.defenseResponse
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}

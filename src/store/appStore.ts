@@ -1,11 +1,9 @@
-import { Zap, Shield, MessageSquare, BarChart2 } from 'lucide-react';
+import { Zap, Shield, MessageSquare } from 'lucide-react';
 import { create } from 'zustand';
 import {
   Run,
   AttackPrompt,
-  AttackStats,
   DefenseResponse,
-  DefenseStats,
   EvalResult,
   EvalStats,
   ComponentType,
@@ -50,20 +48,19 @@ interface AppState {
   // Discovery cache
   runDiscovery: RunDiscovery;
 
-  // Attack
-  attackPrompts: AttackPrompt[];
-  attackStats:   AttackStats | null;
+  // Attack (keyed by session_id)
+  attackPrompts: Record<string, AttackPrompt[]>;
   isAttacking:   boolean;
   attackError:   string | null;
 
-  // Defense
-  defenseResponses: DefenseResponse[];
+  // Defense (keyed by session_id)
+  defenseResponses: Record<string, DefenseResponse[]>;
   defenseStats:     DefenseStats | null;
+  isEvaluating:     boolean;
   defenseError:     string | null;
 
-  // Evaluation
-  evalResults: EvalResult[];
-  evalStats:   EvalStats | null;
+  // Evaluation (keyed by session_id)
+  evalResults: Record<string, EvalResult[]>;
 
   // Connection
   connectionStatus: 'idle' | 'testing' | 'connected' | 'failed';
@@ -83,25 +80,25 @@ interface AppState {
   setRunDiscovery: (d: Partial<RunDiscovery>) => void;
 
   // ── Attack actions ────────────────────────────────────────────────────────────
-  setAttackPrompts:   (prompts: AttackPrompt[]) => void;
-  addAttackPrompt:    (prompt: AttackPrompt)    => void;
-  clearAttackPrompts: ()                         => void;
-  setAttackStats:     (stats: AttackStats)       => void;
-  setIsAttacking:     (v: boolean)               => void;
-  setAttackError:     (msg: string | null)       => void;
+  setAttackPrompts:   (prompts: Record<string, AttackPrompt[]>) => void;
+  addAttackPrompt:    (sessionId: string, prompt: AttackPrompt)  => void;
+  clearAttackPrompts: (sessionId?: string)                        => void;
+  setIsAttacking:     (v: boolean)                                => void;
+  setAttackError:     (msg: string | null)                        => void;
 
   // ── Defense actions ───────────────────────────────────────────────────────────
-  setDefenseResponses:   (responses: DefenseResponse[]) => void;
-  addDefenseResponse:    (response: DefenseResponse)    => void;
-  clearDefenseResponses: ()                              => void;
-  setDefenseStats:       (stats: DefenseStats)           => void;
-  setDefenseError:       (msg: string | null)            => void;
+  setDefenseResponses:   (responses: Record<string, DefenseResponse[]>) => void;
+  addDefenseResponse:    (sessionId: string, response: DefenseResponse)  => void;
+  clearDefenseResponses: (sessionId?: string)                             => void;
+  setDefenseStats:       (stats: DefenseStats)                            => void;
+  setIsEvaluating:       (v: boolean)                                     => void;
+  setDefenseError:       (msg: string | null)                             => void;
 
   // ── Evaluation actions ────────────────────────────────────────────────────────
-  addEvalResult:     (result: EvalResult) => void;
-  setEvalResults:    (results: EvalResult[]) => void;
-  clearEvalResults:  ()                      => void;
-  setEvalStats:      (stats: EvalStats)      => void;
+  addEvalResult:     (sessionId: string, result: EvalResult) => void;
+  setEvalResults:    (results: Record<string, EvalResult[]>) => void;
+  setEvalStats:      (stats: EvalStats)                      => void;
+  clearEvalResults:  (sessionId?: string)                      => void;
 
   // ── Connection ────────────────────────────────────────────────────────────────
   setConnectionStatus: (s: 'idle' | 'testing' | 'connected' | 'failed') => void;
@@ -126,17 +123,16 @@ export const useAppStore = create<AppState>((set) => ({
   runProgress: null,
   runDiscovery: defaultDiscovery,
 
-  attackPrompts: [],
-  attackStats:   null,
+  attackPrompts: {},
   isAttacking:   false,
   attackError:   null,
 
-  defenseResponses: [],
+  defenseResponses: {},
   defenseStats:     null,
+  isEvaluating:     false,
   defenseError:     null,
 
-  evalResults: [],
-  evalStats:   null,
+  evalResults: {},
 
   connectionStatus: 'idle',
 
@@ -162,30 +158,46 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Attack
   setAttackPrompts:  (attackPrompts) => set({ attackPrompts }),
-  addAttackPrompt:   (prompt)        => set(s => {
-    if (s.attackPrompts.some(x => x.promptId === prompt.promptId)) return s;
-    return { attackPrompts: [...s.attackPrompts, prompt] };
+  addAttackPrompt:   (sessionId, prompt) => set(s => {
+    const existing = s.attackPrompts[sessionId] ?? [];
+    if (existing.some(x => x.promptId === prompt.promptId)) return s;
+    return { attackPrompts: { ...s.attackPrompts, [sessionId]: [...existing, prompt] } };
   }),
-  clearAttackPrompts: () => set({ attackPrompts: [] }),
-  setAttackStats:    (attackStats)   => set({ attackStats }),
+  clearAttackPrompts: (sessionId) => set(s => {
+    if (sessionId) {
+      const next = { ...s.attackPrompts };
+      delete next[sessionId];
+      return { attackPrompts: next };
+    }
+    return { attackPrompts: {} };
+  }),
   setIsAttacking:    (isAttacking)   => set({ isAttacking }),
   setAttackError:    (attackError)   => set({ attackError }),
 
   // Defense
   setDefenseResponses:   (defenseResponses) => set({ defenseResponses }),
-  addDefenseResponse: (response) => set(s => {
-    if (s.defenseResponses.some(x => x.promptId === response.promptId)) return s;
-    return { defenseResponses: [...s.defenseResponses, response] };
+  addDefenseResponse: (sessionId, response) => set(s => {
+    const existing = s.defenseResponses[sessionId] ?? [];
+    if (existing.some(x => x.promptId === response.promptId)) return s;
+    return { defenseResponses: { ...s.defenseResponses, [sessionId]: [...existing, response] } };
   }),
-  clearDefenseResponses: ()                 => set({ defenseResponses: [] }),
+  clearDefenseResponses: (sessionId) => set(s => {
+    if (sessionId) {
+      const next = { ...s.defenseResponses };
+      delete next[sessionId];
+      return { defenseResponses: next };
+    }
+    return { defenseResponses: {} };
+  }),
   setDefenseStats:       (defenseStats)     => set({ defenseStats }),
+  setIsEvaluating:       (isEvaluating)     => set({ isEvaluating }),
   setDefenseError:       (defenseError)     => set({ defenseError }),
 
   // Evaluation
-  addEvalResult: (result) => set(s => {
-    const existing = s.evalResults.findIndex(r => r.evalId === result.evalId);
+  addEvalResult: (sessionId, result) => set(s => {
+    const existing = (s.evalResults[sessionId] ?? []).findIndex(r => r.evalId === result.evalId);
     if (existing >= 0) {
-      const prev = s.evalResults[existing];
+      const prev = s.evalResults[sessionId][existing];
       const merged = {
         ...prev,
         attackContent:  result.attackContent  ?? prev.attackContent,
@@ -193,15 +205,23 @@ export const useAppStore = create<AppState>((set) => ({
         was_blocked:    result.was_blocked    ?? prev.was_blocked,
         attack_type:    result.attack_type    ?? prev.attack_type,
       };
-      const next = [...s.evalResults];
+      const next = [...s.evalResults[sessionId]];
       next[existing] = merged;
-      return { evalResults: next };
+      return { evalResults: { ...s.evalResults, [sessionId]: next } };
     }
-    return { evalResults: [...s.evalResults, result] };
+    const prev = s.evalResults[sessionId] ?? [];
+    return { evalResults: { ...s.evalResults, [sessionId]: [...prev, result] } };
   }),
   setEvalResults:   (evalResults) => set({ evalResults }),
-  clearEvalResults: ()            => set({ evalResults: [] }),
-  setEvalStats:     (evalStats)   => set({ evalStats }),
+  setEvalStats:     (evalStats) => set({ evalStats }),
+  clearEvalResults: (sessionId) => set(s => {
+    if (sessionId) {
+      const next = { ...s.evalResults };
+      delete next[sessionId];
+      return { evalResults: next };
+    }
+    return { evalResults: {} };
+  }),
 
   // Connection
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
@@ -211,15 +231,14 @@ export const useAppStore = create<AppState>((set) => ({
     isRunLocked:      false,
     runProgress:      null,
     runDiscovery:     defaultDiscovery,
-    attackPrompts:    [],
-    attackStats:      null,
+    attackPrompts:    {},
     isAttacking:      false,
     attackError:      null,
-    defenseResponses: [],
+    defenseResponses: {},
     defenseStats:     null,
+    isEvaluating:     false,
     defenseError:     null,
-    evalResults:      [],
-    evalStats:        null,
+    evalResults:      {},
     connectionStatus: 'idle',
   }),
 }));

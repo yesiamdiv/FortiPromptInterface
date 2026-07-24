@@ -2,9 +2,11 @@
 // Execution dashboard only — no config, no start button (RunShell handles start).
 // Two sections: 1) stat chips  2) indexed prompt list with expand-on-click.
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AttackPrompt, AttackStatus } from '../types';
 import { useAppStore } from '../store/appStore';
+import { fetchRunStats } from '../services/api';
+import StatsPanel from '../components/stats/StatsPanel';
 
 interface AttackTestingPageProps { embedded?: boolean; }
 
@@ -23,17 +25,19 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
   const runProgress        = useAppStore(s => s.runProgress);
   const clearAttackPrompts = useAppStore(s => s.clearAttackPrompts);
   const setAttackError     = useAppStore(s => s.setAttackError);
+  const activeRunId        = useAppStore(s => s.activeRunId);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  // ─── Stats derived directly from the store ───────────────────────────────────
-  // attackStats (WS-pushed) was never populated by the backend, so we always
-  // compute from the local prompt list. This is always accurate — both live
-  // (prompts arrive via WS) and after reload (prompts are hydrated from the API).
-  const total   = attackPrompts.length;
-  const breached = attackPrompts.filter(p => p.status === 'breached').length;
-  const blocked  = attackPrompts.filter(p => p.status === 'blocked').length;
-  const pending  = attackPrompts.filter(p => p.status === 'generated' || p.status === 'sent').length;
+  const allPrompts  = Object.values(attackPrompts).flat();
+  const sessionKeys = Object.keys(attackPrompts);
+
+  const total   = allPrompts.length;
+  const breached = allPrompts.filter(p => p.status === 'breached').length;
+  const blocked  = allPrompts.filter(p => p.status === 'blocked').length;
+  const pending  = allPrompts.filter(p => p.status === 'generated' || p.status === 'sent').length;
 
   const statItems = total > 0
     ? [
@@ -43,6 +47,17 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
         { label: 'Blocked',  val: blocked,  color: '#15803D' },
       ]
     : null;
+
+  useEffect(() => {
+    if (!isAttacking && activeRunId && allPrompts.length > 0) {
+      setStatsLoading(true);
+      fetchRunStats(activeRunId).then(s => {
+        setStats(s);
+      }).finally(() => setStatsLoading(false));
+    } else if (isAttacking) {
+      setStats(null);
+    }
+  }, [isAttacking, activeRunId]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: "'DM Sans', sans-serif" }}>
@@ -68,13 +83,13 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
           <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>
             {isAttacking
               ? 'Prompts are being generated and sent…'
-              : attackPrompts.length > 0
-              ? `${attackPrompts.length} prompts generated — run complete`
+              : allPrompts.length > 0
+              ? `${allPrompts.length} prompts across ${sessionKeys.length} session(s) — run complete`
               : 'Configure the left panel then click Start Run'}
           </div>
         </div>
-        {attackPrompts.length > 0 && !isAttacking && (
-          <button onClick={clearAttackPrompts} style={{ fontSize: 11, color: '#AAA', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, marginTop: 2 }}>
+        {allPrompts.length > 0 && !isAttacking && (
+          <button onClick={() => clearAttackPrompts()} style={{ fontSize: 11, color: '#AAA', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, marginTop: 2 }}>
             Clear
           </button>
         )}
@@ -88,7 +103,7 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
         </div>
       )}
 
-      {/* ── Section 1: Stat chips ── */}
+      {/* ── Progress bar ── */}
       <div style={{ padding: '16px 24px 0' }}>
         {statItems ? (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -98,7 +113,6 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
                 <span style={{ fontSize: 10, color: '#AAA', textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</span>
               </div>
             ))}
-            {/* Progress bar — shown while running, uses WS run_progress data */}
             {isAttacking && runProgress && runProgress.total > 0 && (
               <div style={{ flex: '1 1 100%', marginTop: 4 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#BBB', marginBottom: 4 }}>
@@ -135,6 +149,16 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
         )}
       </div>
 
+      {/* ── Stats ── */}
+      {stats && !isAttacking && (
+        <StatsPanel
+          chips={[
+            { label: 'Total', value: stats.total_attacks, color: '#555' },
+          ]}
+          loading={false}
+        />
+      )}
+
       {/* ── Section 2: Prompt list ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '16px 24px 20px', background: '#fff', border: '1px solid #E8E6E0', borderRadius: 10, minHeight: 0 }}>
         {/* List header */}
@@ -146,11 +170,11 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
                   <svg className="at-spin" width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="#E8E6E0" strokeWidth="1.5"/><path d="M5.5 1.5a4 4 0 0 1 4 4" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   streaming
                 </span>
-              : `${attackPrompts.length} total`}
+              : `${allPrompts.length} total`}
           </span>
         </div>
 
-        {attackPrompts.length === 0 ? (
+        {allPrompts.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#CCC' }}>
             {isAttacking ? (
               <>
@@ -166,38 +190,45 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {attackPrompts.map((p: AttackPrompt, idx: number) => {
-              const sc    = STATUS_CFG[p.status] ?? { label: p.status, bg: '#F7F6F3', color: '#888', dot: '#CCC' };
-              const isExp = expandedId === p.promptId;
+            {sessionKeys.map(sessionId => {
+              const prompts = attackPrompts[sessionId];
+              let globalIdx = 0;
               return (
-                <div
-                  key={p.promptId}
-                  className="at-row"
-                  style={{ display: 'grid', gridTemplateColumns: '40px auto 1fr auto', gap: 0, borderBottom: '1px solid #F9F8F6', cursor: 'pointer', alignItems: isExp ? 'flex-start' : 'center', transition: 'background .1s' }}
-                  onClick={() => setExpandedId(isExp ? null : p.promptId)}
-                >
-                  {/* Index */}
-                  <div style={{ padding: '12px 0 12px 16px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', userSelect: 'none' }}>
-                    {String(idx + 1).padStart(2, '0')}
+                <div key={sessionId}>
+                  <div style={{ padding: '10px 16px', background: '#F7F6F3', borderBottom: '1px solid #E8E6E0', fontSize: 11, fontWeight: 600, color: '#666', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#999' }}>Session</span>
+                    {sessionId}
+                    <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#AAA' }}>{prompts.length} turns</span>
                   </div>
-
-                  {/* Status badge */}
-                  <div style={{ padding: '12px 12px 12px 8px' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 20, fontSize: 10, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: 'nowrap' }}>
-                      <span style={{ width: 4, height: 4, borderRadius: '50%', background: sc.dot, display: 'inline-block', flexShrink: 0 }}/>
-                      {sc.label}
-                    </span>
-                  </div>
-
-                  {/* Content */}
-                  <div style={{ padding: '12px 8px', fontFamily: 'DM Mono,monospace', fontSize: 11, color: '#555', overflow: 'hidden', textOverflow: isExp ? 'initial' : 'ellipsis', whiteSpace: isExp ? 'pre-wrap' : 'nowrap', wordBreak: 'break-word', lineHeight: 1.55 }}>
-                    {p.content}
-                  </div>
-
-                  {/* Time */}
-                  <div style={{ padding: '12px 16px 12px 8px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                    {new Date(p.timestamp).toLocaleTimeString()}
-                  </div>
+                  {prompts.map((p: AttackPrompt) => {
+                    globalIdx++;
+                    const sc    = STATUS_CFG[p.status] ?? { label: p.status, bg: '#F7F6F3', color: '#888', dot: '#CCC' };
+                    const isExp = expandedId === p.promptId;
+                    return (
+                      <div
+                        key={p.promptId}
+                        className="at-row"
+                        style={{ display: 'grid', gridTemplateColumns: '40px auto 1fr auto', gap: 0, borderBottom: '1px solid #F9F8F6', cursor: 'pointer', alignItems: isExp ? 'flex-start' : 'center', transition: 'background .1s' }}
+                        onClick={() => setExpandedId(isExp ? null : p.promptId)}
+                      >
+                        <div style={{ padding: '12px 0 12px 16px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', userSelect: 'none' }}>
+                          {String(globalIdx).padStart(2, '0')}
+                        </div>
+                        <div style={{ padding: '12px 12px 12px 8px' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 20, fontSize: 10, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: 'nowrap' }}>
+                            <span style={{ width: 4, height: 4, borderRadius: '50%', background: sc.dot, display: 'inline-block', flexShrink: 0 }}/>
+                            {sc.label}
+                          </span>
+                        </div>
+                        <div style={{ padding: '12px 8px', fontFamily: 'DM Mono,monospace', fontSize: 11, color: '#555', overflow: 'hidden', textOverflow: isExp ? 'initial' : 'ellipsis', whiteSpace: isExp ? 'pre-wrap' : 'nowrap', wordBreak: 'break-word', lineHeight: 1.55 }}>
+                          {p.content}
+                        </div>
+                        <div style={{ padding: '12px 16px 12px 8px', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#CCC', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {new Date(p.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -205,10 +236,10 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
         )}
 
         {/* Status breakdown footer */}
-        {attackPrompts.length > 0 && (
+        {allPrompts.length > 0 && (
           <div style={{ display: 'flex', gap: 12, padding: '8px 16px', borderTop: '1px solid #F0EDE6', background: '#FAFAF9', flexWrap: 'wrap', flexShrink: 0 }}>
             {(['generated', 'sent', 'breached', 'blocked', 'failed'] as AttackStatus[]).map(s => {
-              const count = attackPrompts.filter(p => p.status === s).length;
+              const count = allPrompts.filter(p => p.status === s).length;
               if (!count) return null;
               const sc = STATUS_CFG[s];
               return (
@@ -220,7 +251,7 @@ const AttackTestingPage: React.FC<AttackTestingPageProps> = ({ embedded = false 
               );
             })}
             <div style={{ marginLeft: 'auto', fontFamily: 'DM Mono,monospace', fontSize: 10, color: '#BBB' }}>
-              {attackPrompts.length} total
+              {allPrompts.length} total
             </div>
           </div>
         )}

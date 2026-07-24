@@ -59,6 +59,18 @@ export interface DefenseStats {
 
 export type EvalVerdict = 'breach' | 'defended' | 'partial';
 
+export interface EvalDetail {
+  verdict?: string;
+  ttb?: number;
+  latencyMs?: number;
+  sessionStatus?: string;
+  labels?: {
+    intent_harm?: any;
+    response_harm?: any;
+    refusal?: any;
+  };
+}
+
 /**
  * Result from the evaluation node.
  * Contains both the original attack prompt and defense response for context.
@@ -70,6 +82,7 @@ export interface EvalResult {
   score: number;
   reasoning: string;
   timestamp: string;
+  evaluationDetail?: EvalDetail;
   attackContent?: string;
   defenseContent?: string;
   was_blocked?: boolean;

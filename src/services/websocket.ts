@@ -12,8 +12,7 @@ import { useManualStore } from '../store/manualStore';
 import {
   WSNewRunAvailable, WSRunStarted, WSRunProgress, WSRunCompleted,
   WSRunError, WSAttackGenerated, WSDefenseResponseGenerated,
-  WSEvalResult, WSEvalStats, WSDefenseStats, WSAttackStats,
-  EvalResult,
+  WSEvalResult,
 } from '../types';
 
 import {
@@ -31,6 +30,7 @@ class WebSocketService {
     this.socket = io(url, {
       path: '/socket.io',  // explicit — matches backend mount
       auth: authToken ? { token: authToken } : undefined,
+      transports: ['websocket'],  // skip HTTP polling — avoids "Too many packets" errors
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
@@ -127,7 +127,8 @@ class WebSocketService {
     s.on('attack_generated', (data: WSAttackGenerated) => {
       const { addAttackPrompt, activeRunId } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;   // snake_case
-      addAttackPrompt({
+      const sid = data.session_id || `sess_${data.run_id}`;
+      addAttackPrompt(sid, {
         promptId:  data.turn_id,
         content:   data.attack.full_text,
         status:    'generated',
@@ -141,7 +142,8 @@ class WebSocketService {
     s.on('defence_response', (data: WSDefenseResponseGenerated) => {
       const { addDefenseResponse, activeRunId } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
-      addDefenseResponse({
+      const sid = data.session_id || `sess_${data.run_id}`;
+      addDefenseResponse(sid, {
         promptId:        data.turn_id,
         defenseResponse: data.defence.full_text ?? '',
         evaluation:      data.defence.was_blocked ? 'blocked' : 'passed',
@@ -154,24 +156,25 @@ class WebSocketService {
 
     // ── Evaluation node ────────────────────────────────────────────────────────
 
-    // Both event names map to the same handler (backend may fire either)
-    const handleEvalEvent = (data: WSEvalResult) => {
-      const { addEvalResult, activeRunId } = useAppStore.getState();
+    function buildEvalResult(data: WSEvalResult) {
+      const { addEvalResult, activeRunId, attackPrompts, defenseResponses } = useAppStore.getState();
       if (activeRunId !== data.run_id) return;
-      // Dedup: whichever event fires second for the same turn is a no-op
-      if (useAppStore.getState().evalResults.some(r => r.evalId === data.turn_id)) return;
-      const matchedAttack  = useAppStore.getState().attackPrompts.find(a => a.promptId === data.turn_id);
-      const matchedDefence = useAppStore.getState().defenseResponses.find(d => d.promptId === data.turn_id);
+      const sid = data.session_id || `sess_${data.run_id}`;
+      const existingList = useAppStore.getState().evalResults[sid] ?? [];
+      if (existingList.some(r => r.evalId === data.turn_id)) return;
+      const allAttacks   = Object.values(attackPrompts).flat();
+      const allDefences  = Object.values(defenseResponses).flat();
+      const matchedAttack  = allAttacks.find(a => a.promptId === data.turn_id);
+      const matchedDefence = allDefences.find(d => d.promptId === data.turn_id);
+      const meta = data.evaluation.metadata;
 
-      // Map category → verdict. Anything containing "partial" is a partial breach;
-      // success=true without partial = full breach; otherwise defended.
       const cat = (data.evaluation.category ?? '').toLowerCase();
-      const verdict: EvalResult['verdict'] =
+      const verdict: 'breach' | 'defended' | 'partial' =
         cat.includes('partial')           ? 'partial'  :
         data.evaluation.success === true  ? 'breach'   :
         'defended';
 
-      addEvalResult({
+      addEvalResult(sid, {
         evalId:         data.turn_id,
         promptId:       data.turn_id,
         verdict,
@@ -182,16 +185,19 @@ class WebSocketService {
         defenseContent: matchedDefence?.defenseResponse,
         was_blocked:    matchedDefence?.was_blocked,
         attack_type:    matchedDefence?.attack_type,
+        evaluationDetail: meta ? {
+          verdict:       meta.verdict,
+          ttb:           meta.ttb,
+          latencyMs:     meta.latency_ms,
+          sessionStatus: meta.session_status,
+          labels:        meta.turn_labels,
+        } : undefined,
       });
-    };
-    s.on('evaluation_result',   handleEvalEvent);
-    s.on('evaluation_complete', handleEvalEvent);
+    }
 
-    s.on('evaluation_stats_updated', (data: WSEvalStats) => {
-      const { setEvalStats, activeRunId } = useAppStore.getState();
-      if (activeRunId !== data.run_id) return;
-      setEvalStats(data.stats);
-    });
+    s.on('evaluation_result', buildEvalResult);
+    s.on('evaluation_complete', buildEvalResult);
+
   }
 
   private setupManualRunEvents(): void {
@@ -236,12 +242,24 @@ class WebSocketService {
       const label   = data.evaluation.label ?? (data.evaluation.success ? 'breached' : 'blocked');
       const score   = data.evaluation.score;
       const reasoning = data.evaluation.reasoning ?? '';
+      const meta = data.evaluation.metadata;
       appendTurnToActiveSession({
         turn_id:   `eval-${data.turn_id}`,
         role:      'evaluation',
         content:   reasoning,
         timestamp: new Date().toISOString(),
-        metadata:  { label, score, ...data.evaluation },
+        metadata:  {
+          label,
+          score,
+          ...data.evaluation,
+          evalDetails: meta ? {
+            verdict:       meta.verdict,
+            ttb:           meta.ttb,
+            latencyMs:     meta.latency_ms,
+            sessionStatus: meta.session_status,
+            labels:        meta.turn_labels,
+          } : undefined,
+        },
       });
     });
 
@@ -253,11 +271,9 @@ class WebSocketService {
      * run_idle — re-enable the chat input box.
      * This fires after every manual turn cycle completes.
      */
-    s.on('run_idle', (data: WSRunIdle) => {
-      const { setIsWaitingForResponse, activeSession } = useManualStore.getState();
-      if (activeSession?.session_id === data.session_id) {
-        setIsWaitingForResponse(false);
-      }
+    s.on('run_idle', (_data: WSRunIdle) => {
+      const { setIsWaitingForResponse } = useManualStore.getState();
+      setIsWaitingForResponse(false);
     });
   }
 
